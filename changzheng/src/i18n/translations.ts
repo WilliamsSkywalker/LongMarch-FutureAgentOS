@@ -1,0 +1,382 @@
+import { useLanguage } from './LanguageProvider'
+
+export const translations = {
+  en: {
+    // Navbar
+    navHome: 'Home',
+    navGenerate: 'Generate',
+    navCommunity: 'Community',
+    navProfile: 'Profile',
+    navLogin: 'Login',
+    navLogout: 'Logout',
+    navLang: 'EN',
+    navLangTooltip: 'Switch to Chinese',
+
+    // Home
+    homeSearchPlaceholder: 'Search your apps...',
+    homeNewApp: 'New App',
+    homeMyApps: 'My Apps',
+    homeCollected: 'Collected',
+    homeEmptyTitle: 'Your Desktop is Empty',
+    homeEmptyDesc: 'Create your first app or explore the community to collect apps you love.',
+    homeCreateApp: 'Create App',
+    homeExplore: 'Explore Community',
+    homeDiscover: 'Discover',
+    homeApps: 'apps',
+    homeFailedLoad: 'Failed to load',
+    homeCollectedTag: 'Collected',
+
+    // Generator
+    genStep1: 'Describe',
+    genStep2: 'Configure',
+    genStep3: 'Generate',
+    genStep4: 'Result',
+    genDescribeTitle: 'Describe Your App',
+    genDescribeDesc: 'Tell us what you want to build in plain English.',
+    genDescribePlaceholder: 'Describe the app you want to build...',
+    genNext: 'Next',
+    genConfigureTitle: 'Configure Your App',
+    genConfigureDesc: 'Set the details for your new app.',
+    genAppName: 'App Name',
+    genAppDesc: 'Description',
+    genVisibility: 'Visibility',
+    genPublic: 'Public',
+    genPrivate: 'Private',
+    genTags: 'Tags',
+    genBack: 'Back',
+    genGenerate: 'Generate',
+    genGeneratingTitle: 'Generating Your App',
+    genGeneratingDesc: 'Hang tight while we build your app...',
+    genCancel: 'Cancel',
+    genResultTitle: 'Your app is ready!',
+    genOpenApp: 'Open App',
+    genViewCode: 'View Code',
+    genShare: 'Share to Community',
+    genFork: 'Fork & Edit',
+    genLoginRequired: 'Please log in to generate apps.',
+
+    // Community
+    commTitle: 'Community',
+    commDesc: 'Discover apps created by the community. Fork, remix, and share your own creations.',
+    commSearch: 'Search apps...',
+    commLoadMore: 'Load More',
+    commNoApps: 'No apps found. Try a different search.',
+    commFailedLoad: 'Failed to load apps',
+
+    // AppDetail
+    appRun: 'Run App',
+    appFork: 'Fork',
+    appLike: 'Like',
+    appLiked: 'Liked',
+    appFavorite: 'Favorite',
+    appFavorited: 'Favorited',
+    appShare: 'Share',
+    appLoginToInteract: 'Login to interact with this app.',
+    appLiveApp: 'Live App',
+    appSourceCode: 'Source Code',
+    appAbout: 'About',
+    appTags: 'Tags',
+    appLicense: 'License',
+    appCreator: 'Creator',
+    appForkedFrom: 'Forked from',
+    appComments: 'Comments',
+    appWriteComment: 'Write a comment...',
+    appLoginToComment: 'Login to write a comment...',
+    appSubmit: 'Submit',
+    appNoComments: 'No comments yet. Be the first to share your thoughts!',
+    appRelated: 'You May Also Like',
+    appNotFoundTitle: 'App not found',
+    appNotFoundDesc: 'The app you are looking for does not exist.',
+    backToCommunity: 'Back to Community',
+    appInvalidId: 'Invalid app ID',
+    appFailedLoad: 'Failed to load app',
+
+    // Generator placeholders
+    genAppNamePlaceholder: 'My Awesome App',
+    genAppDescPlaceholder: 'A short description of your app',
+
+    // Community categories & sort
+    catAll: 'All',
+    catFan: 'Fan',
+    catGame: 'Game',
+    catTool: 'Tool',
+    catLearning: 'Learning',
+    catMusic: 'Music',
+    catOther: 'Other',
+    sortTrending: 'Trending',
+    sortNewest: 'Newest',
+    sortMostUsed: 'Most Used',
+    sortMostForked: 'Most Forked',
+
+    // Profile
+    profileLoading: 'Loading profile...',
+    profileNotFound: 'User not found',
+    profileLoginTitle: 'Please log in',
+    profileLoginDesc: 'Log in to view your profile, manage your apps, and see your collections.',
+    profileLogin: 'Log In',
+    profileSignup: 'Sign Up',
+    profileMyApps: 'My Apps',
+    profileCollections: 'Collections',
+    profileSettings: 'Settings',
+    profileApps: 'Apps',
+    profileLikes: 'Likes',
+    profileForks: 'Forks',
+    profileProfile: 'Profile',
+    profileManageInfo: 'Manage your public profile information.',
+    profileUsername: 'Username',
+    profileBio: 'Bio',
+    profileAvatar: 'Avatar URL',
+    profileAppearance: 'Appearance',
+    profileChooseTheme: 'Choose your preferred theme.',
+    profileDark: 'Dark',
+    profileLight: 'Light',
+    profileSystem: 'System',
+    profileAPI: 'API',
+    profileAPIKey: 'API Key',
+
+    // Generator alerts
+    genHideCode: 'Hide Code',
+    genOpenAppAlert: 'Opening app in new tab...',
+    genPublishedAlert: 'Published to community!',
+    genForkedAlert: 'Forked! You can now edit this app.',
+    genCodeCopied: 'Code copied to clipboard!',
+    genUntitledApp: 'Untitled App',
+    genGeneratedSuccess: 'has been generated successfully.',
+
+    // AppDetail alerts
+    appForkedAlert: 'Forked! You can now edit this app.',
+    appLinkCopied: 'Link copied to clipboard!',
+    appFailedFork: 'Failed to fork app',
+    appFailedLike: 'Failed to update like',
+    appFailedFavorite: 'Failed to update favorite',
+    appFailedComment: 'Failed to post comment',
+
+    // Profile alerts
+    profileLoginAlert: 'Login form not yet implemented. Please use the API directly.',
+    profileFailedLoad: 'Failed to load profile',
+
+    // CodeViewer
+    cvNoCode: 'No code available.',
+    cvCopied: 'Copied!',
+    cvCopy: 'Copy',
+
+    // AppCard
+    cardOpen: 'Open',
+
+    // Generator stages
+    genStageParsing: 'Parsing',
+    genStageDesigning: 'Designing',
+    genStageBuilding: 'Building',
+    genStageDeploying: 'Deploying',
+    genGenLogs: 'Generation Logs',
+    genWaitingStart: 'Waiting to start...',
+
+    // Footer
+    footerSlogan: 'The People\'s Agent OS',
+    footerLinks: 'Links',
+    footerLicense: 'All apps on LongMarch are open-source under MIT License.',
+    footerPrivacy: 'Privacy',
+    footerCopyright: 'Open source, open future.',
+
+    // Common
+    create: 'Create',
+    explore: 'Explore',
+    loading: 'Loading...',
+    error: 'Error',
+  },
+  zh: {
+    // Navbar
+    navHome: '首页',
+    navGenerate: '生成',
+    navCommunity: '社区',
+    navProfile: '个人中心',
+    navLogin: '登录',
+    navLogout: '退出',
+    navLang: '中',
+    navLangTooltip: 'Switch to English',
+
+    // Home
+    homeSearchPlaceholder: '搜索你的应用...',
+    homeNewApp: '新建应用',
+    homeMyApps: '我的应用',
+    homeCollected: '已收藏',
+    homeEmptyTitle: '桌面为空',
+    homeEmptyDesc: '创建你的第一个应用，或去社区探索你感兴趣的应用。',
+    homeCreateApp: '创建应用',
+    homeExplore: '探索社区',
+    homeDiscover: '发现',
+    homeApps: '个应用',
+    homeFailedLoad: '加载失败',
+    homeCollectedTag: '已收藏',
+
+    // Generator
+    genStep1: '描述',
+    genStep2: '配置',
+    genStep3: '生成',
+    genStep4: '结果',
+    genDescribeTitle: '描述你的应用',
+    genDescribeDesc: '用自然语言告诉我们你想构建什么。',
+    genDescribePlaceholder: '描述你想构建的应用...',
+    genNext: '下一步',
+    genConfigureTitle: '配置你的应用',
+    genConfigureDesc: '设置新应用的详细信息。',
+    genAppName: '应用名称',
+    genAppDesc: '应用描述',
+    genVisibility: '可见性',
+    genPublic: '公开',
+    genPrivate: '私有',
+    genTags: '标签',
+    genBack: '返回',
+    genGenerate: '生成',
+    genGeneratingTitle: '正在生成你的应用',
+    genGeneratingDesc: '请稍候，我们正在构建你的应用...',
+    genCancel: '取消',
+    genResultTitle: '你的应用已就绪！',
+    genOpenApp: '打开应用',
+    genViewCode: '查看代码',
+    genShare: '分享到社区',
+    genFork: 'Fork & 编辑',
+    genLoginRequired: '请登录后再生成应用。',
+
+    // Community
+    commTitle: '社区',
+    commDesc: '发现社区创建的应用。Fork、修改并分享你自己的创作。',
+    commSearch: '搜索应用...',
+    commLoadMore: '加载更多',
+    commNoApps: '未找到应用。尝试不同的搜索。',
+    commFailedLoad: '加载应用失败',
+
+    // AppDetail
+    appRun: '运行应用',
+    appFork: 'Fork',
+    appLike: '点赞',
+    appLiked: '已点赞',
+    appFavorite: '收藏',
+    appFavorited: '已收藏',
+    appShare: '分享',
+    appLoginToInteract: '登录后可与应用互动。',
+    appLiveApp: '实时应用',
+    appSourceCode: '源代码',
+    appAbout: '关于',
+    appTags: '标签',
+    appLicense: '许可证',
+    appCreator: '创建者',
+    appForkedFrom: 'Fork 自',
+    appComments: '评论',
+    appWriteComment: '写评论...',
+    appLoginToComment: '登录后写评论...',
+    appSubmit: '提交',
+    appNoComments: '暂无评论。来做第一个评论者吧！',
+    appRelated: '你可能还喜欢',
+    appNotFoundTitle: '应用未找到',
+    appNotFoundDesc: '你查找的应用不存在。',
+    backToCommunity: '返回社区',
+    appInvalidId: '无效的应用ID',
+    appFailedLoad: '加载应用失败',
+
+    // Generator placeholders
+    genAppNamePlaceholder: '我的超棒应用',
+    genAppDescPlaceholder: '对你的应用做一个简短描述',
+
+    // Community categories & sort
+    catAll: '全部',
+    catFan: '粉丝',
+    catGame: '游戏',
+    catTool: '工具',
+    catLearning: '学习',
+    catMusic: '音乐',
+    catOther: '其他',
+    sortTrending: '热门',
+    sortNewest: '最新',
+    sortMostUsed: '最常用',
+    sortMostForked: '最多Fork',
+
+    // Profile
+    profileLoading: '加载个人资料中...',
+    profileNotFound: '用户未找到',
+    profileLoginTitle: '请登录',
+    profileLoginDesc: '登录后可查看个人资料、管理应用并查看收藏。',
+    profileLogin: '登录',
+    profileSignup: '注册',
+    profileMyApps: '我的应用',
+    profileCollections: '收藏',
+    profileSettings: '设置',
+    profileApps: '应用',
+    profileLikes: '获赞',
+    profileForks: '获Fork',
+    profileProfile: '个人资料',
+    profileManageInfo: '管理你的公开个人资料。',
+    profileUsername: '用户名',
+    profileBio: '简介',
+    profileAvatar: '头像 URL',
+    profileAppearance: '外观',
+    profileChooseTheme: '选择你的偏好主题。',
+    profileDark: '深色',
+    profileLight: '浅色',
+    profileSystem: '跟随系统',
+    profileAPI: 'API',
+    profileAPIKey: 'API 密钥',
+
+    // Generator alerts
+    genHideCode: '隐藏代码',
+    genOpenAppAlert: '正在新标签页打开应用...',
+    genPublishedAlert: '已发布到社区！',
+    genForkedAlert: '已 Fork！你现在可以编辑这个应用。',
+    genCodeCopied: '代码已复制到剪贴板！',
+    genUntitledApp: '未命名应用',
+    genGeneratedSuccess: '已成功生成。',
+
+    // AppDetail alerts
+    appForkedAlert: '已 Fork！你现在可以编辑这个应用。',
+    appLinkCopied: '链接已复制到剪贴板！',
+    appFailedFork: 'Fork 应用失败',
+    appFailedLike: '更新点赞失败',
+    appFailedFavorite: '更新收藏失败',
+    appFailedComment: '发表评论失败',
+
+    // Profile alerts
+    profileLoginAlert: '登录功能尚未实现。请直接使用 API。',
+    profileFailedLoad: '加载个人资料失败',
+
+    // CodeViewer
+    cvNoCode: '暂无代码。',
+    cvCopied: '已复制！',
+    cvCopy: '复制',
+
+    // AppCard
+    cardOpen: '打开',
+
+    // Generator stages
+    genStageParsing: '解析中',
+    genStageDesigning: '设计中',
+    genStageBuilding: '构建中',
+    genStageDeploying: '部署中',
+    genGenLogs: '生成日志',
+    genWaitingStart: '等待开始...',
+
+    // Footer
+    footerSlogan: '人民的智能操作系统',
+    footerLinks: '链接',
+    footerLicense: 'LongMarch 上的所有应用均采用 MIT 开源协议。',
+    footerPrivacy: '隐私',
+    footerCopyright: '开源，开放未来。',
+
+    // Common
+    create: '创建',
+    explore: '探索',
+    loading: '加载中...',
+    error: '错误',
+  },
+}
+
+export type TranslationKey = keyof typeof translations.en
+
+export function t(key: TranslationKey, lang: 'en' | 'zh'): string {
+  return translations[lang][key] || translations.en[key] || key
+}
+
+export function useTranslation() {
+  const { lang } = useLanguage()
+  const translate = (key: TranslationKey) => t(key, lang)
+  return { t: translate, lang }
+}
