@@ -9,6 +9,13 @@ export interface AuthRequest extends Request {
 }
 
 export const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => {
+  // Development mode: auto-authenticate all requests
+  if (process.env.DEV_AUTO_LOGIN === 'true') {
+    req.user = { userId: 1, email: 'dev@localhost', name: 'Dev User' }
+    next()
+    return
+  }
+
   const authHeader = req.headers.authorization
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {

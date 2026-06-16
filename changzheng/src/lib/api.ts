@@ -164,6 +164,12 @@ export function clearToken() {
   localStorage.removeItem('token')
 }
 
+// ─── Dev Mode Auto-Login ──────────────────────
+
+if (import.meta.env.VITE_DEV_AUTO_LOGIN === 'true') {
+  saveToken('dev-token')
+}
+
 // ─── Apps ─────────────────────────────────────
 
 export interface AppItem {

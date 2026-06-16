@@ -37,8 +37,14 @@ export default function Navbar() {
   const [userName, setUserName] = useState('')
   const [userAvatar, setUserAvatar] = useState<string | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const isDevMode = import.meta.env.VITE_DEV_AUTO_LOGIN === 'true'
 
   useEffect(() => {
+    if (isDevMode) {
+      setIsLoggedIn(true)
+      setUserName('Dev User')
+      return
+    }
     const token = localStorage.getItem('token')
     if (token) {
       getMe()
@@ -55,7 +61,7 @@ export default function Navbar() {
     } else {
       setIsLoggedIn(false)
     }
-  }, [location.pathname])
+  }, [location.pathname, isDevMode])
 
   const toggleTheme = () => {
     const html = document.documentElement
