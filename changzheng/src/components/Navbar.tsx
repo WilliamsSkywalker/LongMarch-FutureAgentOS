@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useLocation } from 'react-router'
+import { useState, useEffect } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
 import {
   Flag,
   Sun,
@@ -10,6 +10,7 @@ import {
   Users,
   User,
   Globe,
+  LogOut,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,15 +25,37 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { useLanguage } from '@/i18n/LanguageProvider'
 import { useTranslation } from '@/i18n/translations'
-import { currentUser } from '@/data/mockData'
+import { getMe, clearToken } from '@/lib/api'
 
 export default function Navbar() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { lang, setLang } = useLanguage()
   const { t } = useTranslation()
   const [isDark, setIsDark] = useState(true)
-  const [isLoggedIn] = useState(true)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [userName, setUserName] = useState('')
+  const [userAvatar, setUserAvatar] = useState<string | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      getMe()
+        .then((res) => {
+          setIsLoggedIn(true)
+          setUserName(res.user.name)
+          setUserAvatar(res.user.avatar)
+        })
+        .catch(() => {
+          // Token invalid, clear it
+          clearToken()
+          setIsLoggedIn(false)
+        })
+    } else {
+      setIsLoggedIn(false)
+    }
+  }, [location.pathname])
 
   const toggleTheme = () => {
     const html = document.documentElement
@@ -48,6 +71,13 @@ export default function Navbar() {
 
   const toggleLanguage = () => {
     setLang(lang === 'en' ? 'zh' : 'en')
+  }
+
+  const handleLogout = () => {
+    clearToken()
+    setIsLoggedIn(false)
+    navigate('/')
+    window.location.reload()
   }
 
   const isActive = (path: string) => {
@@ -121,16 +151,29 @@ export default function Navbar() {
           </Button>
 
           {isLoggedIn ? (
-            <Link to="/profile" className="hidden md:flex items-center gap-2">
-              <Avatar className="w-8 h-8">
-                <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                <AvatarFallback>{currentUser.name.charAt(0)}</AvatarFallback>
-              </Avatar>
-            </Link>
+            <div className="hidden md:flex items-center gap-2">
+              <Link to="/profile" className="flex items-center gap-2">
+                <Avatar className="w-8 h-8">
+                  <AvatarImage src={userAvatar || undefined} alt={userName} />
+                  <AvatarFallback>{userName.charAt(0) || 'U'}</AvatarFallback>
+                </Avatar>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLogout}
+                title={t('navLogout')}
+                aria-label="Logout"
+              >
+                <LogOut className="w-5 h-5" />
+              </Button>
+            </div>
           ) : (
-            <Button variant="outline" size="sm" className="hidden md:flex">
-              {t('navLogin')}
-            </Button>
+            <Link to="/login" className="hidden md:flex">
+              <Button variant="outline" size="sm">
+                {t('navLogin')}
+              </Button>
+            </Link>
           )}
 
           {/* Mobile Menu */}
@@ -175,26 +218,43 @@ export default function Navbar() {
               </div>
               <div className="mt-auto pt-6 border-t border-border">
                 {isLoggedIn ? (
-                  <Link
-                    to="/profile"
-                    className="flex items-center gap-3 px-3 py-3"
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Avatar className="w-8 h-8">
-                      <AvatarImage
-                        src={currentUser.avatar}
-                        alt={currentUser.name}
-                      />
-                      <AvatarFallback>
-                        {currentUser.name.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="text-sm font-medium">
-                      {currentUser.name}
-                    </span>
-                  </Link>
+                  <div className="space-y-2">
+                    <Link
+                      to="/profile"
+                      className="flex items-center gap-3 px-3 py-3"
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <Avatar className="w-8 h-8">
+                        <AvatarImage
+                          src={userAvatar || undefined}
+                          alt={userName}
+                        />
+                        <AvatarFallback>
+                          {userName.charAt(0) || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="text-sm font-medium">
+                        {userName}
+                      </span>
+                    </Link>
+                    <Button
+                      variant="ghost"
+                      className="w-full justify-start gap-3"
+                      onClick={() => {
+                        handleLogout()
+                        setMobileOpen(false)
+                      }}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      {t('navLogout')}
+                    </Button>
+                  </div>
                 ) : (
-                  <Button className="w-full">{t('navLogin')}</Button>
+                  <SheetClose asChild>
+                    <Link to="/login">
+                      <Button className="w-full">{t('navLogin')}</Button>
+                    </Link>
+                  </SheetClose>
                 )}
               </div>
             </SheetContent>

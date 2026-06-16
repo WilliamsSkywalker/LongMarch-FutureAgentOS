@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router'
 import {
   FolderOpen,
   Bookmark,
@@ -81,8 +82,12 @@ export default function Profile() {
             {t('profileLoginDesc')}
           </p>
           <div className="flex items-center justify-center gap-3">
-            <Button onClick={() => window.alert(t('profileLoginAlert'))}>{t('profileLogin')}</Button>
-            <Button variant="outline">{t('profileSignup')}</Button>
+            <Button asChild>
+              <Link to="/login">{t('profileLogin')}</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link to="/register">{t('profileSignup')}</Link>
+            </Button>
           </div>
         </div>
       </div>
