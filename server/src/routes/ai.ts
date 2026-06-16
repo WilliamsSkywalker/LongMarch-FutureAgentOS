@@ -4,8 +4,8 @@ import { authMiddleware, AuthRequest } from '../middleware/auth'
 const router = Router()
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini'
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1'
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'deepseek-v4-pro'
 
 // ─── Demo Templates ───────────────────────────
 

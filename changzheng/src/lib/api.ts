@@ -79,7 +79,8 @@ async function apiRequest<T>(
   method: string,
   path: string,
   body?: unknown,
-  requireAuth = false
+  requireAuth = false,
+  timeoutMs = 30000
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -90,19 +91,33 @@ async function apiRequest<T>(
     delete headers.Authorization
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-  const data = await res.json().catch(() => ({}))
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
 
-  if (!res.ok) {
-    throw new Error(data.error || `HTTP ${res.status}`)
+    clearTimeout(timeoutId)
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`)
+    }
+
+    return data as T
+  } catch (err: any) {
+    clearTimeout(timeoutId)
+    if (err.name === 'AbortError') {
+      throw new Error('Request timeout — the server is taking too long to respond')
+    }
+    throw err
   }
-
-  return data as T
 }
 
 // ─── Auth ─────────────────────────────────────
@@ -310,7 +325,7 @@ export interface AIGenerateResponse {
 }
 
 export function generateApp(description: string, name: string, tags?: string[]) {
-  return apiRequest<AIGenerateResponse>('POST', '/api/ai/generate', { description, name, tags }, true)
+  return apiRequest<AIGenerateResponse>('POST', '/api/ai/generate', { description, name, tags }, true, 120000)
 }
 
 // ─── Users ────────────────────────────────────

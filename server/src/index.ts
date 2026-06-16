@@ -1,13 +1,11 @@
+import 'dotenv/config'
 import express, { Request, Response, NextFunction } from 'express'
 import cors from 'cors'
-import dotenv from 'dotenv'
 import authRoutes from './routes/auth'
 import appsRoutes from './routes/apps'
 import usersRoutes from './routes/users'
 import aiRoutes from './routes/ai'
 import './db'
-
-dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 3001
