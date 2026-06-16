@@ -9,7 +9,6 @@ interface GeneratorProgressProps {
 }
 
 const stageKeys = ['genStageParsing', 'genStageDesigning', 'genStageBuilding', 'genStageDeploying'] as const
-const stageIcons = ['FileSearch', 'Palette', 'Hammer', 'Rocket'] as const
 
 export default function GeneratorProgress({ currentStage, logs }: GeneratorProgressProps) {
   const { t } = useTranslation()

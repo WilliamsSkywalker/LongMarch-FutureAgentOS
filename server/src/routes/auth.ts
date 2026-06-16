@@ -167,4 +167,67 @@ router.get('/me', authMiddleware, (req: AuthRequest, res) => {
   }
 })
 
+router.put('/me', authMiddleware, (req: AuthRequest, res) => {
+  try {
+    const userId = req.user?.userId
+    if (!userId) {
+      res.status(401).json({ error: 'Invalid or expired token' })
+      return
+    }
+
+    const { name, bio, avatar } = req.body
+
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+      res.status(400).json({ error: 'Name must be a non-empty string' })
+      return
+    }
+
+    const updateFields: string[] = []
+    const values: any[] = []
+
+    if (name !== undefined) {
+      updateFields.push('name = ?')
+      values.push(name.trim())
+    }
+    if (bio !== undefined) {
+      updateFields.push('bio = ?')
+      values.push(bio)
+    }
+    if (avatar !== undefined) {
+      updateFields.push('avatar = ?')
+      values.push(avatar)
+    }
+
+    if (updateFields.length === 0) {
+      res.status(400).json({ error: 'No fields to update' })
+      return
+    }
+
+    values.push(userId)
+    db.prepare(`UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`).run(...values)
+
+    const user = db.prepare(
+      'SELECT id, name, email, avatar, bio FROM users WHERE id = ?'
+    ).get(userId) as User | undefined
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' })
+      return
+    }
+
+    res.json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar ?? null,
+        bio: user.bio ?? '',
+      },
+    })
+  } catch (err) {
+    console.error('PUT /auth/me error:', err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 export default router

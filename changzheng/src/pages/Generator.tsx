@@ -21,8 +21,9 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { mockApps } from "@/data/mockData"
 import GeneratorProgress from "@/components/GeneratorProgress"
 import MockAppRunner from "@/components/MockAppRunner"
-import { createApp, type CreateAppBody } from '@/lib/api'
+import { createApp, generateApp } from '@/lib/api'
 import type { AppDetail } from '@/lib/api'
+import { showToast } from '@/lib/toast'
 import { useTranslation } from '@/i18n/translations'
 
 const exampleTags = [
@@ -42,6 +43,7 @@ const generationMessages = [
   "Designing color scheme...",
   "Selecting typography...",
   "Building component structure...",
+  "Calling AI generation API...",
   "Writing HTML markup...",
   "Generating CSS styles...",
   "Adding JavaScript interactions...",
@@ -120,19 +122,30 @@ export default function Generator() {
         setTimeout(async () => {
           if (!cancelRef.current) {
             try {
-              const mockCodeFiles = mockApps[0].code || []
-              const mockHtmlFile = mockCodeFiles.find((f) => f.filename.endsWith(".html"))
+              // Step 1: Call AI generation API
+              setLogs((prev) => [...prev, 'Calling AI generation API...'])
+              const aiResult = await generateApp(
+                description,
+                appName,
+                selectedTags
+              )
+              setLogs((prev) => [...prev, `AI generated code (${aiResult.mode} mode)...`])
+
+              // Step 2: Create the app with generated code
               const { app } = await createApp({
                 name: appName,
                 description: appDescription || description,
                 icon: undefined,
                 tags: selectedTags,
-                code: mockHtmlFile ? [{ filename: 'index.html', content: mockHtmlFile.content }] : [],
-                preview_html: description,
+                code: aiResult.code,
+                preview_html: aiResult.preview_html,
                 is_public: isPublic,
               })
               setCreatedApp(app)
               setStep(4)
+              if (aiResult.mode === 'demo') {
+                setLogs((prev) => [...prev, 'Note: Demo mode — set OPENAI_API_KEY for real AI generation'])
+              }
             } catch (err) {
               setCreateError(err instanceof Error ? err.message : 'Failed to create app')
               setStep(2)
@@ -155,15 +168,15 @@ export default function Generator() {
   }
 
   const handleOpenApp = () => {
-    alert(t('genOpenAppAlert'))
+    showToast.info(t('genOpenAppAlert'))
   }
 
   const handleShare = () => {
-    alert(t('genPublishedAlert'))
+    showToast.success(t('genPublishedAlert'))
   }
 
   const handleFork = () => {
-    alert(t('genForkedAlert'))
+    showToast.success(t('genForkedAlert'))
   }
 
   const codeFiles = (demoApp as any).code || []
@@ -495,6 +508,8 @@ export default function Generator() {
 }
 
 function CodeBlock({ code, language }: { code: string; language: string }) {
+  const { t } = useTranslation()
+
   const highlighted = highlightCode(code, language)
 
   const getLanguageColor = () => {
@@ -522,7 +537,7 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
           className="h-7 text-xs"
           onClick={() => {
             navigator.clipboard.writeText(code)
-            alert(t('genCodeCopied'))
+            showToast.success(t('genCodeCopied'))
           }}
         >
           Copy

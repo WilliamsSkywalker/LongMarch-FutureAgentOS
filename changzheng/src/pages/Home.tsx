@@ -12,13 +12,12 @@ import {
   ArrowUpRight,
   LayoutGrid,
   List,
-  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { motion, AnimatePresence } from 'framer-motion'
-import { getUserApps, getUserFavorites, getMe, type User, type AppItem } from '@/lib/api'
+import { getUserApps, getUserFavorites, getMe, listApps, type User, type AppItem } from '@/lib/api'
 import { useTranslation } from '@/i18n/translations'
 
 // Icon mapping for app icons (same as AppCard)
@@ -172,7 +171,18 @@ export default function Home() {
         setMyApps(apps.apps)
         setCollectedApps(favs.apps)
       } catch (err: any) {
-        setError(err.message || t('homeFailedLoad'))
+        if (err.message?.includes('401') || err.message?.includes('Unauthorized') || err.message?.includes('token')) {
+          setCurrentUser(null)
+          // Load community apps for guests
+          try {
+            const community = await listApps({ sort: 'trending', limit: 8 })
+            setMyApps(community.apps)
+          } catch {
+            setMyApps([])
+          }
+        } else {
+          setError(err.message || t('homeFailedLoad'))
+        }
       } finally {
         setLoading(false)
       }
@@ -242,8 +252,14 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right: Actions */}
+          {/* Right: Actions + User info */}
           <div className="flex items-center gap-2">
+            {currentUser && (
+              <span className="text-xs text-muted-foreground hidden sm:inline">
+                {currentUser.name}
+              </span>
+            )}
+
             {/* View toggle */}
             <div className="flex items-center bg-white/[0.04] rounded-lg p-1 border border-white/[0.08]">
               <button
@@ -277,8 +293,26 @@ export default function Home() {
 
       {/* Main content area */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
-        {/* Search results or grouped view */}
-        {search.trim() ? (
+        {loading && (
+          <div className="text-center py-20">
+            <div className="w-10 h-10 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground text-sm">{t('homeLoading')}</p>
+          </div>
+        )}
+
+        {error && !loading && (
+          <div className="text-center py-20">
+            <p className="text-red-400 text-sm mb-4">{error}</p>
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+              {t('homeRetry')}
+            </Button>
+          </div>
+        )}
+
+        {!loading && !error && (
+          <>
+            {/* Search results or grouped view */}
+            {search.trim() ? (
           <div>
             <h2 className="text-sm font-medium text-muted-foreground mb-4">
               Search Results ({filteredApps.length})
@@ -425,7 +459,9 @@ export default function Home() {
             )}
           </div>
         )}
-      </div>
+      </>
+    )}
+  </div>
 
       {/* Bottom taskbar-like area */}
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-background/80 backdrop-blur-md border-t border-white/[0.06]">

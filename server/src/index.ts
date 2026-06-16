@@ -4,6 +4,7 @@ import dotenv from 'dotenv'
 import authRoutes from './routes/auth'
 import appsRoutes from './routes/apps'
 import usersRoutes from './routes/users'
+import aiRoutes from './routes/ai'
 import './db'
 
 dotenv.config()
@@ -26,6 +27,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use('/auth', authRoutes)
 app.use('/apps', appsRoutes)
 app.use('/users', usersRoutes)
+app.use('/api/ai', aiRoutes)
 
 // Error handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {

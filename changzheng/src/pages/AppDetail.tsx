@@ -33,6 +33,7 @@ import {
   type AppDetail,
   type Comment,
 } from '@/lib/api'
+import { showToast } from '@/lib/toast'
 import { useTranslation } from '@/i18n/translations'
 
 export default function AppDetail() {
@@ -65,8 +66,8 @@ export default function AppDetail() {
         if (!cancelled) {
           setApp(appRes.app)
           setUser(meRes?.user ? { name: meRes.user.name, avatar: meRes.user.avatar } : null)
-          setLiked(false)
-          setIsFavorited(false)
+          setLiked(appRes.app.user_liked || false)
+          setIsFavorited(appRes.app.user_favorited || false)
         }
       } catch (err) {
         if (!cancelled) {
@@ -111,19 +112,19 @@ export default function AppDetail() {
     if (!app || !user) return
     try {
       const res = await forkApp(app.uuid)
-      alert(t('appForkedAlert'))
+      showToast.success(t('appForkedAlert'))
       navigate(`/app/${res.app.uuid}`)
     } catch (err) {
-      alert(err instanceof Error ? err.message : t('appFailedFork'))
+      showToast.error(err instanceof Error ? err.message : t('appFailedFork'))
     }
   }
 
   const handleShare = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href)
-      alert(t('appLinkCopied'))
+      showToast.success(t('appLinkCopied'))
     } catch {
-      alert(t('appLinkCopied'))
+      showToast.success(t('appLinkCopied'))
     }
   }
 
@@ -140,7 +141,7 @@ export default function AppDetail() {
         setApp((prev) => (prev ? { ...prev, likes: res.likes } : prev))
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : t('appFailedLike'))
+      showToast.error(err instanceof Error ? err.message : t('appFailedLike'))
     }
   }
 
@@ -155,7 +156,7 @@ export default function AppDetail() {
         setIsFavorited(true)
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : t('appFailedFavorite'))
+      showToast.error(err instanceof Error ? err.message : t('appFailedFavorite'))
     }
   }
 
@@ -166,8 +167,9 @@ export default function AppDetail() {
       setCommentText('')
       const refreshed = await getApp(app.uuid)
       setApp(refreshed.app)
+      showToast.success('Comment posted!')
     } catch (err) {
-      alert(err instanceof Error ? err.message : t('appFailedComment'))
+      showToast.error(err instanceof Error ? err.message : t('appFailedComment'))
     }
   }
 

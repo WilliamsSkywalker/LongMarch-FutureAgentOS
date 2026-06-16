@@ -82,10 +82,11 @@ router.post('/', authMiddleware, (req: AuthRequest, res) => {
 })
 
 // GET /apps/:id — Get app details by UUID or numeric ID
-router.get('/:id', (req, res) => {
+router.get('/:id', (req: AuthRequest, res) => {
   try {
-    const { id } = req.params
+    const { id } = req.params as { id: string }
     const isNumeric = /^\d+$/.test(id)
+    const userId = req.user?.userId
 
     // Increment uses
     const updateStmt = isNumeric
@@ -121,12 +122,24 @@ router.get('/:id', (req, res) => {
       ORDER BY c.created_at DESC
     `).all(app.id)
 
+    // Check if current user liked/favorited this app
+    let userLiked = false
+    let userFavorited = false
+    if (userId) {
+      const likeCheck = db.prepare('SELECT 1 FROM app_likes WHERE app_id = ? AND user_id = ?').get(app.id, userId)
+      userLiked = !!likeCheck
+      const favCheck = db.prepare('SELECT 1 FROM user_favorites WHERE app_id = ? AND user_id = ?').get(app.id, userId)
+      userFavorited = !!favCheck
+    }
+
     res.json({
       app: {
         ...app,
         tags: JSON.parse(app.tags as unknown as string),
         code: JSON.parse(app.code as unknown as string),
         comments,
+        user_liked: userLiked,
+        user_favorited: userFavorited,
       },
     })
   } catch (err: any) {

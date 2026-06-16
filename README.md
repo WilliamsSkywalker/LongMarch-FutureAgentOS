@@ -99,6 +99,49 @@ npm run dev
 
 ---
 
+## 部署到生产环境
+
+### 前端部署（Vercel）
+
+```bash
+cd changzheng
+npm install
+npm run build
+# 将 dist/ 目录部署到 Vercel
+vercel --prod
+```
+
+Vercel 配置已包含在 `vercel.json` 中。
+
+**环境变量**：在 Vercel Dashboard 中设置 `VITE_API_BASE_URL` 指向你的后端域名。
+
+### 后端部署（Railway / Render）
+
+**Railway（推荐）**：
+```bash
+cd server
+railway login
+railway init
+railway up
+```
+
+**Render**：使用 `server/Procfile` 或 `server/Dockerfile` 部署。
+
+**环境变量**：在 Railway/Render Dashboard 中设置：
+- `JWT_SECRET` — 随机字符串（必须修改）
+- `CORS_ORIGIN` — 你的前端域名（如 `https://longmarch.vercel.app`）
+- `OPENAI_API_KEY` — 可选，用于 AI 真实生成
+
+### 部署后检查清单
+
+- [ ] 后端健康检查：`GET /health` 返回 `{"status":"ok"}`
+- [ ] 前端能正常调用后端 API（无 CORS 错误）
+- [ ] 用户注册/登录正常工作
+- [ ] Generator 能生成应用（Demo 或 Real 模式）
+- [ ] 社区页面能加载应用列表
+
+---
+
 ## 功能特性
 
 ### 已实现（P0）

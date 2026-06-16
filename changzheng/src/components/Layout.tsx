@@ -1,3 +1,4 @@
+import { Toaster } from '@/components/ui/sonner'
 import Navbar from './Navbar'
 import Footer from './Footer'
 
@@ -9,6 +10,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {children}
       </main>
       <Footer />
+      <Toaster />
     </div>
   )
 }

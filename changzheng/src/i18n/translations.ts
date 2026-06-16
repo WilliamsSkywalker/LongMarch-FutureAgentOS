@@ -25,6 +25,8 @@ export const translations = {
     homeApps: 'apps',
     homeFailedLoad: 'Failed to load',
     homeCollectedTag: 'Collected',
+    homeLoading: 'Loading...',
+    homeRetry: 'Retry',
 
     // Generator
     genStep1: 'Describe',
@@ -234,6 +236,8 @@ export const translations = {
     homeApps: '个应用',
     homeFailedLoad: '加载失败',
     homeCollectedTag: '已收藏',
+    homeLoading: '加载中...',
+    homeRetry: '重试',
 
     // Generator
     genStep1: '描述',

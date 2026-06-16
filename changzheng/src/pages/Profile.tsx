@@ -18,7 +18,7 @@ import { Separator } from '@/components/ui/separator'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import AppCard from '@/components/AppCard'
-import { getMe, getUserApps, getUserFavorites, type User, type AppItem } from '@/lib/api'
+import { getMe, getUserApps, getUserFavorites, updateMe, type User, type AppItem } from '@/lib/api'
 import { useTranslation } from '@/i18n/translations'
 
 export default function Profile() {
@@ -28,6 +28,11 @@ export default function Profile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editBio, setEditBio] = useState('')
+  const [editAvatar, setEditAvatar] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const { t } = useTranslation()
 
   useEffect(() => {
@@ -43,6 +48,9 @@ export default function Profile() {
         ])
         if (!cancelled) {
           setUser(me)
+          setEditName(me.name)
+          setEditBio(me.bio)
+          setEditAvatar(me.avatar || '')
           setMyApps(appsData)
           setCollectedApps(favsData)
         }
@@ -64,6 +72,27 @@ export default function Profile() {
     load()
     return () => { cancelled = true }
   }, [])
+
+  const handleSaveProfile = async () => {
+    setSaving(true)
+    setSaveError('')
+    try {
+      const body: { name?: string; bio?: string; avatar?: string } = {}
+      if (editName !== user?.name) body.name = editName
+      if (editBio !== user?.bio) body.bio = editBio
+      if (editAvatar !== (user?.avatar || '')) body.avatar = editAvatar || undefined
+
+      const { user: updated } = await updateMe(body)
+      setUser(updated)
+      setEditName(updated.name)
+      setEditBio(updated.bio)
+      setEditAvatar(updated.avatar || '')
+    } catch (err: any) {
+      setSaveError(err.message || 'Failed to save profile')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -238,16 +267,16 @@ export default function Profile() {
                     <Label htmlFor="username">{t('profileUsername')}</Label>
                     <Input
                       id="username"
-                      defaultValue={user.name}
-                      readOnly
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="bio">{t('profileBio')}</Label>
                     <Textarea
                       id="bio"
-                      defaultValue={user.bio}
-                      readOnly
+                      value={editBio}
+                      onChange={(e) => setEditBio(e.target.value)}
                       className="min-h-[80px]"
                     />
                   </div>
@@ -255,10 +284,29 @@ export default function Profile() {
                     <Label htmlFor="avatar">{t('profileAvatar')}</Label>
                     <Input
                       id="avatar"
-                      defaultValue={user.avatar ?? ''}
-                      readOnly
+                      value={editAvatar}
+                      onChange={(e) => setEditAvatar(e.target.value)}
                     />
                   </div>
+                  {saveError && (
+                    <div className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
+                      {saveError}
+                    </div>
+                  )}
+                  <Button
+                    onClick={handleSaveProfile}
+                    disabled={saving}
+                    className="gap-2"
+                  >
+                    {saving ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        {t('loading')}
+                      </span>
+                    ) : (
+                      t('create')
+                    )}
+                  </Button>
                 </div>
 
                 <Separator />

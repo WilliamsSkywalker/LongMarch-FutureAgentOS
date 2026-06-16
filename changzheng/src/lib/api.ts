@@ -1,6 +1,6 @@
 import { mockApps, mockUsers, currentUser } from '@/data/mockData'
 
-const API_BASE = 'http://localhost:3001'
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001'
 
 function getToken(): string | null {
   return localStorage.getItem('token')
@@ -137,6 +137,10 @@ export function getMe() {
   })
 }
 
+export function updateMe(body: { name?: string; bio?: string; avatar?: string }) {
+  return apiRequest<{ user: User }>('PUT', '/auth/me', body, true)
+}
+
 export function saveToken(token: string) {
   localStorage.setItem('token', token)
 }
@@ -169,6 +173,8 @@ export interface AppDetail extends AppItem {
   preview_html: string
   forked_from?: number
   comments: Comment[]
+  user_liked?: boolean
+  user_favorited?: boolean
 }
 
 export interface Comment {
@@ -292,6 +298,19 @@ export function postComment(id: string, content: string) {
 
 export function getComments(id: string) {
   return apiRequest<{ comments: Comment[] }>('GET', `/apps/${id}/comments`)
+}
+
+// ─── AI ───────────────────────────────────────
+
+export interface AIGenerateResponse {
+  code: { filename: string; content: string }[]
+  preview_html: string
+  mode: 'real' | 'demo'
+  message?: string
+}
+
+export function generateApp(description: string, name: string, tags?: string[]) {
+  return apiRequest<AIGenerateResponse>('POST', '/api/ai/generate', { description, name, tags }, true)
 }
 
 // ─── Users ────────────────────────────────────
