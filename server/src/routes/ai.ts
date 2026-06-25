@@ -1,13 +1,15 @@
 import { Router } from 'express'
 import { authMiddleware, AuthRequest } from '../middleware/auth'
+import { db } from '../db'
 import { cleanupHtmlSource, wrapInFullHtml, parseLLMResponse } from '../lib/html-cleanup'
 import { validateHtml, autoFixHtml } from '../lib/html-validator'
+import { getProviderConfig, getDefaultProvider, getDefaultApiKey, getDefaultBaseUrl, getDefaultModel } from '../lib/provider-catalog'
 
 const router = Router()
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1'
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'deepseek-v4-pro'
+const PLATFORM_API_KEY = getDefaultApiKey()
+const PLATFORM_BASE_URL = getDefaultBaseUrl()
+const PLATFORM_MODEL = getDefaultModel()
 
 // ─── System Prompt ────────────────────────────
 // 基于 Ironsmith 的约束设计，约 40 条规则
@@ -71,6 +73,24 @@ Your task is to write HTML content that goes inside a <body> tag.
 === RETURN FORMAT ===
 Return a JSON object with this exact structure:
 {"content": "the HTML content that goes inside <body> tags"}`
+
+// ─── Repair Prompt ────────────────────────────
+// 当验证失败时，让 LLM 修复错误
+
+const REPAIR_PROMPT = `You are a HTML repair assistant. Given HTML code with validation errors, fix them and return the corrected HTML.
+
+Rules:
+- Fix ONLY the validation errors, do not change the app's functionality or design
+- Keep the same structure and content as much as possible
+- Return ONLY the corrected HTML content (what goes inside <body> tags)
+- No markdown fences, no explanation text
+- Return JSON: {"content": "fixed HTML"}
+
+Common fixes:
+- Unclosed tags: add missing closing tags
+- Mismatched tags: ensure opening and closing tags match
+- Nested errors: fix improper tag nesting (e.g., block inside inline)
+- Self-closing tags: use proper syntax for img, input, br, etc.`
 
 // ─── Demo Templates ───────────────────────────
 
@@ -324,9 +344,50 @@ function selectDemoTemplate(description: string, name: string): { content: strin
   return { content: fullHtml, preview: bodyContent }
 }
 
-// ─── Real AI Generation ──────────────────────
+// ─── User Provider Config ──────────────────────
 
-async function callLLM(description: string, name: string, tags: string[]): Promise<{ code: string; preview: string; cleanupIssues: string[]; validation: any }> {
+interface UserProviderConfig {
+  apiKey: string
+  baseUrl: string
+  model: string
+  providerId: string
+  isUserKey: boolean
+}
+
+function getUserProviderConfig(userId: number): UserProviderConfig {
+  // 1. Check if user has their own API key
+  const userKey = db.prepare(
+    'SELECT provider, api_key, model, base_url FROM user_api_keys WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1'
+  ).get(userId) as { provider: string; api_key: string; model: string; base_url: string } | undefined
+
+  if (userKey) {
+    return {
+      apiKey: userKey.api_key,
+      baseUrl: userKey.base_url,
+      model: userKey.model,
+      providerId: userKey.provider,
+      isUserKey: true,
+    }
+  }
+
+  // 2. Fall back to platform default
+  return {
+    apiKey: PLATFORM_API_KEY || '',
+    baseUrl: PLATFORM_BASE_URL,
+    model: PLATFORM_MODEL,
+    providerId: 'deepseek',
+    isUserKey: false,
+  }
+}
+
+// ─── LLM Call ────────────────────────────────
+
+async function callLLM(
+  description: string,
+  name: string,
+  tags: string[],
+  config: UserProviderConfig
+): Promise<{ code: string; preview: string; cleanupIssues: string[]; validation: any }> {
   const userMessage = `Build an app called "${name}".
 
 Description: ${description}
@@ -334,18 +395,14 @@ ${tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''}
 
 Please generate the HTML content that goes inside the <body> tag. Follow the system instructions exactly.`
 
-  const apiKey = OPENAI_API_KEY
-  const baseUrl = OPENAI_BASE_URL
-  const model = OPENAI_MODEL
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
-      model,
+      model: config.model,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMessage },
@@ -367,7 +424,6 @@ Please generate the HTML content that goes inside the <body> tag. Follow the sys
   let parsed = parseLLMResponse(rawContent)
   if (!parsed) {
     console.error('Failed to parse LLM response, attempting raw HTML extraction:', rawContent.substring(0, 200))
-    // Fallback: try to extract raw HTML from the response
     const htmlMatch = rawContent.match(/<\w[\s\S]*?<\/\w+>/)
     if (htmlMatch) {
       parsed = { code: rawContent, preview: rawContent }
@@ -376,14 +432,14 @@ Please generate the HTML content that goes inside the <body> tag. Follow the sys
     }
   }
 
-  // Step 1: Cleanup (HtmlSourceCleanup)
+  // Step 1: Cleanup
   const cleanup = cleanupHtmlSource(parsed.code, name)
   let bodyContent = cleanup.html
 
-  // Step 2: Validation (HtmlValidator)
+  // Step 2: Validation
   let validation = validateHtml(bodyContent)
 
-  // Step 3: Auto-fix if validation fails
+  // Step 3: Auto-fix
   if (!validation.valid) {
     console.log('Validation failed, attempting auto-fix:', validation.errors)
     bodyContent = autoFixHtml(bodyContent)
@@ -393,7 +449,7 @@ Please generate the HTML content that goes inside the <body> tag. Follow the sys
     }
   }
 
-  // Step 4: Wrap in full HTML document
+  // Step 4: Wrap in full HTML
   const fullHtml = wrapInFullHtml(bodyContent, name)
 
   return {
@@ -404,55 +460,197 @@ Please generate the HTML content that goes inside the <body> tag. Follow the sys
   }
 }
 
+// ─── Repair Loop ─────────────────────────────
+
+async function repairWithLLM(
+  originalHtml: string,
+  validationErrors: any[],
+  name: string,
+  config: UserProviderConfig
+): Promise<string | null> {
+  const repairMessage = `The following HTML code has validation errors. Please fix them.
+
+=== VALIDATION ERRORS ===
+${validationErrors.map((e: any) => `- ${e.message}`).join('\n')}
+
+=== CURRENT HTML ===
+${originalHtml}
+
+=== INSTRUCTIONS ===
+Fix the validation errors while preserving the app's functionality and design.
+Return ONLY the corrected HTML content (inside <body> tags).
+Return JSON: {"content": "fixed HTML"}`
+
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: REPAIR_PROMPT },
+        { role: 'user', content: repairMessage },
+      ],
+      temperature: 0.3, // Lower temperature for precise fixes
+      max_tokens: 4000,
+    }),
+  })
+
+  if (!response.ok) {
+    return null
+  }
+
+  const data = await response.json() as any
+  const rawContent = data.choices?.[0]?.message?.content || ''
+
+  let parsed = parseLLMResponse(rawContent)
+  if (!parsed) {
+    // Try to extract HTML directly
+    const bodyMatch = rawContent.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
+    if (bodyMatch) return bodyMatch[1]
+    return rawContent.includes('<') ? rawContent : null
+  }
+
+  return parsed.code
+}
+
+// ─── Generation with Repair Loop ─────────────
+
+async function generateWithRepair(
+  description: string,
+  name: string,
+  tags: string[],
+  userId: number
+): Promise<{ code: string; preview: string; mode: string; cleanupIssues: string[]; validation: any; repairAttempts: number }> {
+  const config = getUserProviderConfig(userId)
+  let repairAttempts = 0
+  const maxRepairAttempts = 3
+
+  // Initial generation
+  let result = await callLLM(description, name, tags, config)
+
+  // Repair loop
+  while (!result.validation.valid && repairAttempts < maxRepairAttempts) {
+    repairAttempts++
+    console.log(`Repair attempt ${repairAttempts}/${maxRepairAttempts}...`)
+
+    const repairedHtml = await repairWithLLM(
+      result.code,
+      result.validation.errors,
+      name,
+      config
+    )
+
+    if (!repairedHtml) {
+      console.log('Repair failed: LLM returned empty response')
+      break
+    }
+
+    // Cleanup and validate repaired HTML
+    const cleanup = cleanupHtmlSource(repairedHtml, name)
+    let bodyContent = cleanup.html
+    let validation = validateHtml(bodyContent)
+
+    if (!validation.valid) {
+      bodyContent = autoFixHtml(bodyContent)
+      validation = validateHtml(bodyContent)
+    }
+
+    result = {
+      code: wrapInFullHtml(bodyContent, name),
+      preview: cleanup.preview,
+      cleanupIssues: [...result.cleanupIssues, ...cleanup.issues, `Repair attempt ${repairAttempts}`],
+      validation,
+    }
+
+    if (validation.valid) {
+      console.log(`Repair successful after ${repairAttempts} attempts`)
+      break
+    }
+  }
+
+  const mode = config.isUserKey ? 'real-user' : 'real-platform'
+
+  return {
+    code: result.code,
+    preview: result.preview,
+    mode,
+    cleanupIssues: result.cleanupIssues,
+    validation: result.validation,
+    repairAttempts,
+  }
+}
+
 // ─── Route ──────────────────────────────────
 
 router.post('/generate', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { description, name, tags } = req.body
+    const userId = req.user!.userId
 
     if (!description || !name) {
       res.status(400).json({ error: 'Description and name are required' })
       return
     }
 
-    // Real mode with API key
-    if (OPENAI_API_KEY) {
-      try {
-        const result = await callLLM(description, name, tags || [])
-        res.json({
-          code: [{ filename: 'index.html', content: result.code }],
-          preview_html: result.preview,
-          mode: 'real',
-          cleanup_issues: result.cleanupIssues,
-          validation: {
-            valid: result.validation.valid,
-            errors: result.validation.errors,
-            warnings: result.validation.warnings,
-            stats: result.validation.stats,
-          },
-        })
-        return
-      } catch (err) {
-        console.error('LLM call failed, falling back to demo mode:', err)
-        // Fall through to demo mode
-      }
+    // Check if we have any API key (platform or user)
+    const config = getUserProviderConfig(userId)
+    if (!config.apiKey) {
+      // No API key available, use demo mode
+      const template = selectDemoTemplate(description, name)
+      const validation = validateHtml(template.content)
+      res.json({
+        code: [{ filename: 'index.html', content: template.content }],
+        preview_html: template.preview,
+        mode: 'demo',
+        message: 'No AI API key configured. Generated demo app. Go to Profile → API Keys to add your own key.',
+        validation: {
+          valid: validation.valid,
+          errors: validation.errors,
+          warnings: validation.warnings,
+          stats: validation.stats,
+        },
+      })
+      return
     }
 
-    // Demo mode (no API key or LLM call failed)
-    const template = selectDemoTemplate(description, name)
-    const validation = validateHtml(template.content)
-    res.json({
-      code: [{ filename: 'index.html', content: template.content }],
-      preview_html: template.preview,
-      mode: 'demo',
-      message: 'AI API key not configured or LLM call failed. Generated demo app. Set OPENAI_API_KEY to enable real AI generation.',
-      validation: {
-        valid: validation.valid,
-        errors: validation.errors,
-        warnings: validation.warnings,
-        stats: validation.stats,
-      },
-    })
+    // Real AI generation with repair loop
+    try {
+      const result = await generateWithRepair(description, name, tags || [], userId)
+
+      res.json({
+        code: [{ filename: 'index.html', content: result.code }],
+        preview_html: result.preview,
+        mode: result.mode,
+        cleanup_issues: result.cleanupIssues,
+        repair_attempts: result.repairAttempts,
+        validation: {
+          valid: result.validation.valid,
+          errors: result.validation.errors,
+          warnings: result.validation.warnings,
+          stats: result.validation.stats,
+        },
+      })
+    } catch (err) {
+      console.error('LLM call failed, falling back to demo mode:', err)
+      // Fall back to demo mode
+      const template = selectDemoTemplate(description, name)
+      const validation = validateHtml(template.content)
+      res.json({
+        code: [{ filename: 'index.html', content: template.content }],
+        preview_html: template.preview,
+        mode: 'demo',
+        message: 'AI generation failed. Generated demo app instead.',
+        validation: {
+          valid: validation.valid,
+          errors: validation.errors,
+          warnings: validation.warnings,
+          stats: validation.stats,
+        },
+      })
+    }
 
   } catch (err: any) {
     console.error('AI generation error:', err)

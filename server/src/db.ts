@@ -92,6 +92,20 @@ db.exec(`
     FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS user_api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    model TEXT DEFAULT '',
+    base_url TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, provider),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_apps_author ON apps(author_id);
   CREATE INDEX IF NOT EXISTS idx_apps_public ON apps(is_public);
   CREATE INDEX IF NOT EXISTS idx_apps_created ON apps(created_at);
