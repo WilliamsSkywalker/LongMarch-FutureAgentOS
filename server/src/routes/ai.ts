@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import { authMiddleware, AuthRequest } from '../middleware/auth'
+import { cleanupHtmlSource, wrapInFullHtml, parseLLMResponse } from '../lib/html-cleanup'
+import { validateHtml, autoFixHtml } from '../lib/html-validator'
 
 const router = Router()
 
@@ -7,34 +9,73 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.deepseek.com/v1'
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'deepseek-v4-pro'
 
+// ─── System Prompt ────────────────────────────
+// 基于 Ironsmith 的约束设计，约 40 条规则
+// 核心：LLM 只生成 <body> 内的内容，平台提供完整的 HTML 框架
+
+const SYSTEM_PROMPT = `You are an expert web developer for the LongMarch platform.
+Your task is to write HTML content that goes inside a <body> tag.
+
+=== FRAMEWORK RULES ===
+1. Generate ONLY the content that goes inside <body> tags
+2. Do NOT include <html>, <head>, <body>, <meta>, <title>, <DOCTYPE> tags
+3. Do NOT include <link> tags for stylesheets (Tailwind CSS is provided by the platform)
+4. Do NOT include <script src="..."> for external libraries (use inline JS only)
+5. Do NOT include <style> tags for global CSS (use inline style="" or Tailwind classes)
+6. The platform provides: Tailwind CSS, custom colors (primary #8B1A1A, accent #D4A843, surface #141414, background #0a0a0a, text #fafafa)
+
+=== CODE ORGANIZATION ===
+7. Use semantic HTML tags (header, nav, main, section, article, footer)
+8. Use Tailwind CSS utility classes for styling
+9. Keep JavaScript in a single <script> block at the end of the content
+10. All event handlers use inline onclick (no addEventListener for simple cases)
+
+=== FUNCTIONAL CONSTRAINTS (NEGATIVE) ===
+11. Do NOT add backend, server, or API calls (no fetch to external APIs)
+12. Do NOT add analytics, tracking, or cookies
+13. Do NOT add auth, login, or user accounts
+14. Do NOT add external links (href="https://...") - keep the app self-contained
+15. Do NOT make the app overly complex - it must fit in a single file
+16. Do NOT use eval() or new Function() - security risk
+17. Do NOT use document.write() - deprecated
+18. Do NOT add pop-ups, banners, or ads
+
+=== UI/UX PATTERNS ===
+19. Dark theme is default: use dark background colors (#0a0a0a, #141414)
+20. Use the platform's color system: text-white, text-zinc-400, bg-primary (#8B1A1A), text-accent (#D4A843)
+21. Use responsive design with Tailwind classes (flex, grid, md:, lg:)
+22. Add hover states and transitions for interactive elements
+23. Use rounded corners (rounded-lg, rounded-xl) for modern look
+24. Add proper spacing with padding and gap utilities
+
+=== OUTPUT FORMAT ===
+25. Return ONLY the content that goes inside <body> tags
+26. No markdown fences (no \`\`\`html or \`\`\`)
+27. No explanation text before or after the code
+28. No thinking blocks or reasoning text
+29. No comments explaining obvious code
+30. No TODO, FIXME, or placeholder comments
+
+=== COMPLEXITY BOUNDARY ===
+31. If the user's request is too complex, simplify it to fit in a single file
+32. Prefer focused utilities over full applications
+33. One screen = one page; do not create multi-page navigation (use tabs or sections instead)
+34. Maximum ~100 HTML elements total (divs, buttons, inputs, etc.)
+35. JavaScript should be under 200 lines
+
+=== LANGUAGE ===
+36. Use Chinese or English based on the user's description language
+37. Keep text concise and clear
+38. Use proper typography (font sizes, weights, line heights)
+
+=== RETURN FORMAT ===
+Return a JSON object with this exact structure:
+{"content": "the HTML content that goes inside <body> tags"}`
+
 // ─── Demo Templates ───────────────────────────
 
 function createDemoArchive(name: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${name}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Inter, system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; }
-  .header { padding: 24px 32px; border-bottom: 1px solid #222; background: #141414; position: sticky; top: 0; z-index: 10; }
-  .header h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 12px; }
-  .search { width: 100%; max-width: 500px; padding: 10px 16px; border-radius: 8px; border: 1px solid #333; background: #0a0a0a; color: #fafafa; font-size: 14px; outline: none; }
-  .search:focus { border-color: #8B1A1A; }
-  .container { max-width: 900px; margin: 0 auto; padding: 24px 32px; }
-  .timeline { display: flex; flex-direction: column; gap: 16px; }
-  .item { display: flex; gap: 16px; padding: 16px; background: #141414; border-radius: 12px; border: 1px solid transparent; transition: all 0.2s; cursor: pointer; }
-  .item:hover { border-color: #8B1A1A; transform: translateX(4px); }
-  .date { min-width: 70px; color: #D4A843; font-weight: 600; font-size: 13px; }
-  .content h3 { font-size: 16px; margin-bottom: 4px; }
-  .content p { color: #a1a1aa; font-size: 14px; }
-  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; background: #8B1A1A20; color: #D4A843; font-size: 12px; margin-top: 8px; }
-</style>
-</head>
-<body>
-  <div class="header">
+  return `<div class="header">
     <h1>📚 ${name}</h1>
     <input class="search" placeholder="Search items..." id="search" oninput="filterItems()">
   </div>
@@ -73,38 +114,11 @@ function createDemoArchive(name: string): string {
         item.style.display = item.dataset.term.toLowerCase().includes(q) ? 'flex' : 'none';
       });
     }
-  </script>
-</body>
-</html>`
+  </script>`
 }
 
 function createDemoCalculator(name: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${name}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Inter, system-ui, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
-  .calc { width: 100%; max-width: 360px; background: #141414; border-radius: 20px; padding: 24px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); border: 1px solid #222; }
-  .display { background: #0a0a0a; border-radius: 12px; padding: 20px; text-align: right; margin-bottom: 16px; min-height: 80px; display: flex; flex-direction: column; justify-content: flex-end; }
-  .display .prev { color: #71717a; font-size: 14px; min-height: 18px; }
-  .display .curr { font-size: 32px; font-weight: 600; word-break: break-all; }
-  .buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-  .btn { border: none; border-radius: 12px; padding: 16px; font-size: 18px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: #fafafa; }
-  .btn:hover { transform: scale(1.05); }
-  .btn:active { transform: scale(0.95); }
-  .btn-num { background: #222; }
-  .btn-op { background: #333; color: #D4A843; }
-  .btn-eq { background: #8B1A1A; grid-column: span 2; }
-  .btn-clear { background: #333; color: #ef4444; }
-  .btn-del { background: #333; color: #71717a; }
-</style>
-</head>
-<body>
-  <div class="calc">
+  return `<div class="calc">
     <div class="display">
       <div class="prev" id="prev"></div>
       <div class="curr" id="curr">0</div>
@@ -138,37 +152,11 @@ function createDemoCalculator(name: string): string {
     function calculate() { if (!op || !prev) return; const a = parseFloat(prev), b = parseFloat(curr); let r; switch(op) { case '+': r = a + b; break; case '-': r = a - b; break; case '*': r = a * b; break; case '/': r = b === 0 ? 'Error' : a / b; break; } curr = String(r); prev = ''; op = null; update(); }
     function clearAll() { curr = '0'; prev = ''; op = null; update(); }
     function del() { curr = curr.length > 1 ? curr.slice(0, -1) : '0'; update(); }
-  </script>
-</body>
-</html>`
+  </script>`
 }
 
 function createDemoTimeline(name: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${name}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Inter, system-ui, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; }
-  .header { padding: 32px; text-align: center; border-bottom: 1px solid #222; }
-  .header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
-  .header p { color: #a1a1aa; }
-  .container { max-width: 800px; margin: 0 auto; padding: 32px; }
-  .timeline { position: relative; }
-  .timeline::before { content: ''; position: absolute; left: 20px; top: 0; bottom: 0; width: 2px; background: #333; }
-  .event { display: flex; gap: 20px; margin-bottom: 32px; position: relative; }
-  .dot { width: 16px; height: 16px; border-radius: 50%; background: #8B1A1A; border: 3px solid #0a0a0a; flex-shrink: 0; margin-top: 4px; z-index: 1; }
-  .card { background: #141414; border-radius: 12px; padding: 20px; flex: 1; border: 1px solid #222; }
-  .card h3 { font-size: 18px; margin-bottom: 6px; }
-  .card .year { color: #D4A843; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
-  .card p { color: #a1a1aa; font-size: 14px; line-height: 1.6; }
-</style>
-</head>
-<body>
-  <div class="header">
+  return `<div class="header">
     <h1>📅 ${name}</h1>
     <p>Explore the history and milestones</p>
   </div>
@@ -199,40 +187,11 @@ function createDemoTimeline(name: string): string {
         </div>
       </div>
     </div>
-  </div>
-</body>
-</html>`
+  </div>`
 }
 
 function createDemoDashboard(name: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${name}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Inter, system-ui, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; }
-  .header { padding: 24px 32px; border-bottom: 1px solid #222; background: #141414; }
-  .header h1 { font-size: 1.5rem; font-weight: 700; }
-  .container { max-width: 1100px; margin: 0 auto; padding: 24px 32px; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
-  .stat { background: #141414; border-radius: 12px; padding: 20px; border: 1px solid #222; }
-  .stat .label { color: #71717a; font-size: 13px; margin-bottom: 8px; }
-  .stat .value { font-size: 28px; font-weight: 700; color: #fafafa; }
-  .stat .change { font-size: 13px; color: #22c55e; margin-top: 4px; }
-  .chart { background: #141414; border-radius: 12px; padding: 20px; border: 1px solid #222; }
-  .chart h3 { font-size: 16px; margin-bottom: 16px; }
-  .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-  .bar-label { min-width: 60px; font-size: 13px; color: #a1a1aa; }
-  .bar-track { flex: 1; height: 24px; background: #0a0a0a; border-radius: 6px; overflow: hidden; }
-  .bar-fill { height: 100%; background: #8B1A1A; border-radius: 6px; transition: width 1s ease; }
-  .bar-value { min-width: 40px; font-size: 13px; text-align: right; }
-</style>
-</head>
-<body>
-  <div class="header">
+  return `<div class="header">
     <h1>📊 ${name}</h1>
   </div>
   <div class="container">
@@ -265,45 +224,11 @@ function createDemoDashboard(name: string): string {
       <div class="bar-row"><div class="bar-label">Item C</div><div class="bar-track"><div class="bar-fill" style="width:60%"></div></div><div class="bar-value">60</div></div>
       <div class="bar-row"><div class="bar-label">Item D</div><div class="bar-track"><div class="bar-fill" style="width:45%"></div></div><div class="bar-value">45</div></div>
     </div>
-  </div>
-</body>
-</html>`
+  </div>`
 }
 
 function createDemoTodo(name: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${name}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Inter, system-ui, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; display: flex; justify-content: center; padding: 40px 20px; }
-  .app { width: 100%; max-width: 480px; }
-  .app h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 24px; text-align: center; }
-  .input-row { display: flex; gap: 8px; margin-bottom: 20px; }
-  .input-row input { flex: 1; padding: 12px 16px; border-radius: 8px; border: 1px solid #333; background: #141414; color: #fafafa; font-size: 14px; outline: none; }
-  .input-row input:focus { border-color: #8B1A1A; }
-  .input-row button { padding: 12px 20px; border-radius: 8px; border: none; background: #8B1A1A; color: #fff; font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
-  .input-row button:hover { opacity: 0.9; }
-  .list { display: flex; flex-direction: column; gap: 8px; }
-  .task { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #141414; border-radius: 8px; border: 1px solid #222; transition: all 0.2s; }
-  .task:hover { border-color: #333; }
-  .task.done .text { text-decoration: line-through; color: #71717a; }
-  .task .check { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #333; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-  .task.done .check { background: #8B1A1A; border-color: #8B1A1A; }
-  .task .text { flex: 1; font-size: 14px; }
-  .task .del { color: #71717a; cursor: pointer; font-size: 18px; opacity: 0; transition: opacity 0.2s; }
-  .task:hover .del { opacity: 1; }
-  .task .del:hover { color: #ef4444; }
-  .filters { display: flex; gap: 8px; margin-bottom: 16px; justify-content: center; }
-  .filters button { padding: 6px 14px; border-radius: 20px; border: 1px solid #333; background: transparent; color: #a1a1aa; font-size: 13px; cursor: pointer; transition: all 0.2s; }
-  .filters button.active { background: #8B1A1A; border-color: #8B1A1A; color: #fff; }
-</style>
-</head>
-<body>
-  <div class="app">
+  return `<div class="app">
     <h1>✅ ${name}</h1>
     <div class="input-row">
       <input id="input" placeholder="Add a new task..." onkeydown="if(event.key==='Enter') addTask()">
@@ -336,39 +261,11 @@ function createDemoTodo(name: string): string {
     function remove(i) { tasks.splice(i,1); render(); }
     function setFilter(f) { filter = f; document.querySelectorAll('.filters button').forEach(b => b.classList.remove('active')); event.target.classList.add('active'); render(); }
     render();
-  </script>
-</body>
-</html>`
+  </script>`
 }
 
 function createDemoPortfolio(name: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${name}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: Inter, system-ui, sans-serif; background: #0a0a0a; color: #fafafa; min-height: 100vh; }
-  .hero { text-align: center; padding: 60px 32px 40px; }
-  .hero .avatar { width: 100px; height: 100px; border-radius: 50%; background: #8B1A1A; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; font-size: 40px; }
-  .hero h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
-  .hero p { color: #a1a1aa; max-width: 400px; margin: 0 auto; }
-  .container { max-width: 900px; margin: 0 auto; padding: 0 32px 40px; }
-  .projects { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
-  .project { background: #141414; border-radius: 12px; overflow: hidden; border: 1px solid #222; transition: all 0.2s; cursor: pointer; }
-  .project:hover { border-color: #8B1A1A; transform: translateY(-4px); }
-  .project .thumb { height: 160px; background: #1a1a1a; display: flex; align-items: center; justify-content: center; font-size: 48px; }
-  .project .info { padding: 16px; }
-  .project .info h3 { font-size: 16px; margin-bottom: 4px; }
-  .project .info p { color: #71717a; font-size: 13px; }
-  .tags { display: flex; gap: 6px; margin-top: 12px; }
-  .tags span { padding: 3px 10px; border-radius: 4px; background: #222; font-size: 12px; color: #D4A843; }
-</style>
-</head>
-<body>
-  <div class="hero">
+  return `<div class="hero">
     <div class="avatar">👤</div>
     <h1>${name}</h1>
     <p>A showcase of creative work and projects built with passion.</p>
@@ -400,59 +297,42 @@ function createDemoPortfolio(name: string): string {
         </div>
       </div>
     </div>
-  </div>
-</body>
-</html>`
+  </div>`
 }
 
 function selectDemoTemplate(description: string, name: string): { content: string; preview: string } {
   const desc = description.toLowerCase()
-  let content = ''
+  let bodyContent = ''
 
   if (desc.includes('calc') || desc.includes('convert') || desc.includes('math') || desc.includes('计算')) {
-    content = createDemoCalculator(name)
+    bodyContent = createDemoCalculator(name)
   } else if (desc.includes('archive') || desc.includes('collection') || desc.includes('收集') || desc.includes('存档')) {
-    content = createDemoArchive(name)
+    bodyContent = createDemoArchive(name)
   } else if (desc.includes('timeline') || desc.includes('history') || desc.includes('时间线') || desc.includes('历史')) {
-    content = createDemoTimeline(name)
+    bodyContent = createDemoTimeline(name)
   } else if (desc.includes('dashboard') || desc.includes('track') || desc.includes('chart') || desc.includes('仪表板') || desc.includes('追踪')) {
-    content = createDemoDashboard(name)
+    bodyContent = createDemoDashboard(name)
   } else if (desc.includes('todo') || desc.includes('task') || desc.includes('list') || desc.includes('待办') || desc.includes('清单')) {
-    content = createDemoTodo(name)
+    bodyContent = createDemoTodo(name)
   } else if (desc.includes('portfolio') || desc.includes('showcase') || desc.includes('展示') || desc.includes('作品')) {
-    content = createDemoPortfolio(name)
+    bodyContent = createDemoPortfolio(name)
   } else {
-    // Default: archive-style for most apps
-    content = createDemoArchive(name)
+    bodyContent = createDemoArchive(name)
   }
 
-  // Extract preview from the HTML (the body content without the outer html/head)
-  const bodyMatch = content.match(/<body>([\s\S]*?)<\/body>/)
-  const preview = bodyMatch ? bodyMatch[1] : content
-
-  return { content, preview }
+  const fullHtml = wrapInFullHtml(bodyContent, name)
+  return { content: fullHtml, preview: bodyContent }
 }
 
 // ─── Real AI Generation ──────────────────────
 
-async function callLLM(description: string, name: string, tags: string[]): Promise<{ code: { filename: string; content: string }[]; preview_html: string }> {
-  const systemPrompt = `You are an expert web developer. Create a complete, functional HTML application based on the user's description.
+async function callLLM(description: string, name: string, tags: string[]): Promise<{ code: string; preview: string; cleanupIssues: string[]; validation: any }> {
+  const userMessage = `Build an app called "${name}".
 
-Requirements:
-1. Output a single HTML file with embedded CSS and JavaScript
-2. The app should be fully functional and interactive
-3. Use modern CSS (flexbox/grid) for responsive layout
-4. Dark theme with color scheme: background #0a0a0a, surface #141414, primary #8B1A1A, accent #D4A843, text #fafafa
-5. Include any necessary libraries via CDN if needed
-6. Make it visually polished and professional
-7. Use Chinese or English based on the user's description language
+Description: ${description}
+${tags.length > 0 ? `Tags: ${tags.join(', ')}` : ''}
 
-Return ONLY a JSON object with NO markdown formatting:
-{"code": [{"filename": "index.html", "content": "<!DOCTYPE html>..."}], "preview_html": "<div>...preview for iframe...</div>"}
-
-User description: ${description}
-App name: ${name}
-Tags: ${tags.join(', ')}`
+Please generate the HTML content that goes inside the <body> tag. Follow the system instructions exactly.`
 
   const apiKey = OPENAI_API_KEY
   const baseUrl = OPENAI_BASE_URL
@@ -467,7 +347,8 @@ Tags: ${tags.join(', ')}`
     body: JSON.stringify({
       model,
       messages: [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userMessage },
       ],
       temperature: 0.7,
       max_tokens: 4000,
@@ -480,23 +361,46 @@ Tags: ${tags.join(', ')}`
   }
 
   const data = await response.json() as any
-  const content = data.choices?.[0]?.message?.content || ''
+  const rawContent = data.choices?.[0]?.message?.content || ''
 
   // Parse JSON from the response
-  let parsed: any
-  try {
-    // Try to extract JSON if wrapped in markdown code blocks
-    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-    const jsonStr = jsonMatch ? jsonMatch[1] : content
-    parsed = JSON.parse(jsonStr)
-  } catch (err) {
-    console.error('Failed to parse LLM response:', content)
-    throw new Error('LLM returned invalid JSON format')
+  let parsed = parseLLMResponse(rawContent)
+  if (!parsed) {
+    console.error('Failed to parse LLM response, attempting raw HTML extraction:', rawContent.substring(0, 200))
+    // Fallback: try to extract raw HTML from the response
+    const htmlMatch = rawContent.match(/<\w[\s\S]*?<\/\w+>/)
+    if (htmlMatch) {
+      parsed = { code: rawContent, preview: rawContent }
+    } else {
+      throw new Error('LLM returned invalid format - could not parse JSON or HTML')
+    }
   }
 
+  // Step 1: Cleanup (HtmlSourceCleanup)
+  const cleanup = cleanupHtmlSource(parsed.code, name)
+  let bodyContent = cleanup.html
+
+  // Step 2: Validation (HtmlValidator)
+  let validation = validateHtml(bodyContent)
+
+  // Step 3: Auto-fix if validation fails
+  if (!validation.valid) {
+    console.log('Validation failed, attempting auto-fix:', validation.errors)
+    bodyContent = autoFixHtml(bodyContent)
+    validation = validateHtml(bodyContent)
+    if (validation.valid) {
+      cleanup.issues.push('Auto-fixed HTML errors')
+    }
+  }
+
+  // Step 4: Wrap in full HTML document
+  const fullHtml = wrapInFullHtml(bodyContent, name)
+
   return {
-    code: parsed.code || [{ filename: 'index.html', content: parsed.content || content }],
-    preview_html: parsed.preview_html || parsed.code?.[0]?.content || '',
+    code: fullHtml,
+    preview: cleanup.preview,
+    cleanupIssues: cleanup.issues,
+    validation,
   }
 }
 
@@ -516,9 +420,16 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res) => {
       try {
         const result = await callLLM(description, name, tags || [])
         res.json({
-          code: result.code,
-          preview_html: result.preview_html,
+          code: [{ filename: 'index.html', content: result.code }],
+          preview_html: result.preview,
           mode: 'real',
+          cleanup_issues: result.cleanupIssues,
+          validation: {
+            valid: result.validation.valid,
+            errors: result.validation.errors,
+            warnings: result.validation.warnings,
+            stats: result.validation.stats,
+          },
         })
         return
       } catch (err) {
@@ -529,11 +440,18 @@ router.post('/generate', authMiddleware, async (req: AuthRequest, res) => {
 
     // Demo mode (no API key or LLM call failed)
     const template = selectDemoTemplate(description, name)
+    const validation = validateHtml(template.content)
     res.json({
       code: [{ filename: 'index.html', content: template.content }],
       preview_html: template.preview,
       mode: 'demo',
       message: 'AI API key not configured or LLM call failed. Generated demo app. Set OPENAI_API_KEY to enable real AI generation.',
+      validation: {
+        valid: validation.valid,
+        errors: validation.errors,
+        warnings: validation.warnings,
+        stats: validation.stats,
+      },
     })
 
   } catch (err: any) {

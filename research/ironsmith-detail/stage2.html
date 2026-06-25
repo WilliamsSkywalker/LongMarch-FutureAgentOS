@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阶段② · 提示词优化 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>阶段② · 提示词优化</h1>
+  <p class="subtitle">Prompt Refinement · 可选阶段 · 可跳过</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html">① 元数据</a>
+    <a href="stage2.html" class="active">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+  </div>
+
+  <span class="stage-badge agent">Agent（LLM 驱动）· 可选</span>
+
+  <h2>职责</h2>
+  <p>将用户的模糊描述扩展为详细的实现指令。这是一个 <strong>可选阶段</strong>，由 <code>promptRefinementEnabled</code> 标志控制。如果用户描述很清晰，可以直接跳过。</p>
+
+  <h2>源码结构</h2>
+  <pre><code>// PromptRefinement.swift
+// 职责：将模糊用户描述扩展为详细实现指令
+
+struct PromptRefinement {
+    let isEnabled: Bool  // promptRefinementEnabled
+    let languageModel: LanguageModel
+    
+    func refine(_ userPrompt: String) async -> String {
+        guard isEnabled else {
+            return userPrompt  // 直接跳过，返回原始描述
+        }
+        
+        let systemPrompt = """
+        You are a product requirements translator. Given a user's vague
+        app description, expand it into detailed implementation instructions
+        while preserving the user's intent.
+        """
+        
+        let refinementPrompt = """
+        User wants to build an app. Expand their description into detailed
+        implementation instructions. Preserve their intent exactly.
+        
+        User description: \(userPrompt)
+        
+        Provide a refined description that includes:
+        - Core functionality and UI layout
+        - Key user interactions
+        - Data flow (if any)
+        - Visual style preferences (if implied)
+        
+        Do NOT add features the user didn't mention.
+        Do NOT change the scope or complexity.
+        """
+        
+        let refined = await languageModel.chat(
+            system: systemPrompt,
+            user: refinementPrompt
+        )
+        
+        return refined
+    }
+}</code></pre>
+
+  <h2>模型提示词</h2>
+
+  <div class="prompt-block">
+    <h5>系统提示（System Prompt）</h5>
+    <pre><code>You are a product requirements translator for a macOS utility app builder.
+Your job is to take a user's vague or brief description and expand it into
+clear implementation instructions for a SwiftUI developer.
+
+Rules:
+- Preserve the user's exact intent — do not add features they didn't mention
+- Do not increase scope or complexity beyond what they asked
+- Focus on what the app DOES, not how it's built
+- Include UI layout suggestions only if the user implied them
+- Keep it concise but complete (3-5 sentences max)</code></pre>
+  </div>
+
+  <div class="prompt-block">
+    <h5>用户提示（User Prompt）示例</h5>
+    <pre><code>User wants to build an app. Expand their description into detailed
+implementation instructions. Preserve their intent exactly.
+
+User description: "A clipboard cleaner that strips tracking parameters"
+
+Provide a refined description that includes:
+- Core functionality and UI layout
+- Key user interactions
+- Data flow (if any)
+- Visual style preferences (if implied)</code></pre>
+  </div>
+
+  <div class="prompt-block">
+    <h5>预期输出（Expected Output）</h5>
+    <pre><code>A menubar utility that monitors the system clipboard. When a URL is
+copied, it automatically strips common tracking parameters (utm_source,
+utm_medium, fbclid, etc.) and replaces the clipboard with the clean URL.
+The UI should show a small window listing recent cleaned URLs with
+original and cleaned versions. Include a toggle to enable/disable
+auto-cleaning. Minimalist dark theme design.</code></pre>
+  </div>
+
+  <h2>关键设计决策</h2>
+
+  <h4>为什么是可选的？</h4>
+  <p><strong>避免过度工程化。</strong> 如果用户描述已经很清晰（如 "Build a calculator with basic operations"），再让 LLM "优化" 可能会添加不必要的功能（如 "add scientific mode"）。所以默认关闭，只在用户描述模糊时开启。</p>
+
+  <h4>为什么强调 "不要添加未提及的功能"？</h4>
+  <p>LLM 有强烈的 "helpful" 倾向，会主动添加它认为 "有用" 的功能。这在代码生成中可能导致过度复杂。明确的负约束防止 LLM "好心办坏事"。</p>
+
+  <div class="highlight">
+    <p>💡 <strong>对 LongMarch 的启示：</strong> 可以考虑在 Generator 页面添加一个 "Auto-enhance description" 开关，让用户选择是否启用提示词优化。默认关闭，避免意外添加功能。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — "promptRefinementEnabled flag controls whether the user's prompt is expanded by an LLM before code generation"</p>
+  </div>
+
+</div>
+</body>
+</html>

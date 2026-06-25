@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ironsmith 应用生成流程深度拆解</title>
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --surface: #141414;
+      --surface-2: #1a1a1a;
+      --border: #2a2a2a;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --accent: #D4A843;
+      --primary: #8B1A1A;
+      --primary-light: #a52a2a;
+      --code-bg: #0d0d0d;
+      --link: #D4A843;
+      --link-hover: #e8c97a;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1rem;
+      margin-bottom: 40px;
+    }
+    h2 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin: 40px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--accent);
+    }
+    h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin: 28px 0 12px;
+      color: var(--text);
+    }
+    h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 20px 0 8px;
+      color: var(--text-muted);
+    }
+    p { margin-bottom: 12px; color: var(--text-muted); }
+    .highlight {
+      background: var(--surface-2);
+      border-left: 3px solid var(--accent);
+      padding: 16px 20px;
+      margin: 16px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .highlight p { color: var(--text); margin: 0; }
+    .tag {
+      display: inline-block;
+      background: var(--primary);
+      color: #fff;
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .tag-secondary {
+      background: var(--surface-2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+    code {
+      font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: var(--accent);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      overflow-x: auto;
+      margin: 16px 0;
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: var(--text);
+    }
+    .prompt-block {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin: 16px 0;
+    }
+    .prompt-block h5 {
+      font-size: 0.85rem;
+      color: var(--accent);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    a {
+      color: var(--link);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    a:hover { color: var(--link-hover); text-decoration: underline; }
+    .toc {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 40px;
+    }
+    .toc h3 { margin: 0 0 12px; font-size: 1rem; }
+    .toc ul { list-style: none; padding: 0; }
+    .toc li { margin: 6px 0; }
+    .toc a { color: var(--text-muted); font-size: 0.9rem; }
+    .toc a:hover { color: var(--accent); }
+    .answer-box {
+      background: var(--primary);
+      background: linear-gradient(135deg, var(--primary) 0%, #5a0f0f 100%);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 24px 0;
+    }
+    .answer-box h3 { margin: 0 0 12px; color: #fff; font-size: 1.1rem; }
+    .answer-box p { color: rgba(255,255,255,0.85); margin: 0; }
+    .answer-box .tag { background: rgba(255,255,255,0.2); color: #fff; }
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 40px 0;
+    }
+    .component-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .component-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+    }
+    .component-item h4 { margin: 0 0 4px; color: var(--accent); font-size: 0.95rem; }
+    .component-item p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+    .component-item .meta {
+      margin-top: 8px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .flow-diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin: 20px 0;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 2;
+      color: var(--text-muted);
+      overflow-x: auto;
+    }
+    .flow-diagram .arrow { color: var(--accent); }
+    .flow-diagram .stage { color: var(--text); font-weight: 600; }
+    .flow-diagram .harness { color: var(--primary-light); }
+    .footnote {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 60px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+    }
+    @media (max-width: 640px) {
+      h1 { font-size: 1.6rem; }
+      h2 { font-size: 1.2rem; }
+      body { padding: 20px 12px; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <h1>🔥 Ironsmith 应用生成流程深度拆解</h1>
+  <p class="subtitle">基于 <a href="https://github.com/Jeidoban/Ironsmith" target="_blank">github.com/Jeidoban/Ironsmith</a> 源码与架构文档 AGENTS.md 的逆向分析</p>
+
+  <div class="toc">
+    <h3>📋 目录</h3>
+    <ul>
+      <li><a href="#q1">一、核心问题：死循环 vs. Agent Harness</a></li>
+      <li><a href="#pipeline">二、六阶段生成管道全景图</a></li>
+      <li><a href="#prompts">三、提示词编排：系统约束与分层策略</a></li>
+      <li><a href="#tools">四、Tool 使用：谁有工具调用能力</a></li>
+      <li><a href="#memory">五、Memory 机制：上下文与记忆管理</a></li>
+      <li><a href="#harness">六、Harness 详解：每个阶段的控制器</a></li>
+      <li><a href="#repair">七、编译-修复循环：最复杂的 Agent</a></li>
+      <li><a href="#edit">八、编辑模式：Diff vs. 全量重写</a></li>
+      <li><a href="#compare">九、与 LongMarch 的对比启示</a></li>
+    </ul>
+  </div>
+
+  <!-- 核心问题 -->
+  <h2 id="q1">一、核心问题：死循环 vs. Agent Harness</h2>
+
+  <div class="answer-box">
+    <h3>🎯 答案：不是死循环，是带 Harness 的 Agent 编排</h3>
+    <p>Ironsmith 的生成管道不是简单的 "while(有错误) { 修复 }" 死循环，而是一个 <strong>由多个专用 Agent 组成的编排系统</strong>，每个 Agent 有明确的职责边界、输入/输出契约和故障恢复策略。整体由 <code>SingleFileToolGenerationRuntime</code> 这个 orchestrator 调度，但真正的复杂度在 <code>ContentViewBuildRepairLoop</code> 这个 Agent 内部。</p>
+    <div style="margin-top:12px">
+      <span class="tag">Agent 编排</span>
+      <span class="tag">Harness 控制</span>
+      <span class="tag">策略选择</span>
+      <span class="tag">故障恢复</span>
+    </div>
+  </div>
+
+  <p>具体来说，Ironsmith 的架构是 <strong>"Controller + Specialized Agents + Deterministic Harness"</strong> 三层结构：</p>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>🎛️ Controller（调度层）</h4>
+      <p><code>SingleFileToolGenerationRuntime</code> — 负责六阶段顺序执行、状态机管理、失败重试和回退策略。它知道每个阶段该调用哪个 Agent，但不懂具体怎么生成代码。</p>
+      <div class="meta">相当于 "项目经理"，知道流程，不懂技术细节</div>
+    </div>
+    <div class="component-item">
+      <h4>🤖 Specialized Agents（执行层）</h4>
+      <p><code>ToolMetadataClient</code>（元数据 Agent）、<code>ContentViewBuildRepairLoop</code>（编译修复 Agent）、<code>ToolAppBundleClient</code>（打包 Agent）等。每个 Agent 有独立的提示词、工具使用和记忆策略。</p>
+      <div class="meta">相当于 "各专业工程师"，各司其职</div>
+    </div>
+    <div class="component-item">
+      <h4>🔧 Deterministic Harness（可靠性层）</h4>
+      <p><code>ContentViewSourceCleanup</code>（正则清洗）、<code>ToolGenerationRepairPolicy</code>（策略配置）、<code>ToolVersionBackupClient</code>（版本备份）。这些不是 LLM，是代码逻辑，确保 Agent 的输出不会破坏系统。</p>
+      <div class="meta">相当于 "质检员 + 安全员"，用代码规则保护系统</div>
+    </div>
+  </div>
+
+  <div class="highlight">
+    <p><strong>关键洞察：</strong> 如果只用死循环，系统会在错误修复时无限震荡。Ironsmith 通过引入 <code>ToolRepairStrategy</code>（策略选择）和 <code>ToolGenerationRepairPolicy</code>（策略配置），把 "修复" 变成一个有策略、有预算、有回退的 Agent 行为。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- 六阶段管道 -->
+  <h2 id="pipeline">二、六阶段生成管道全景图</h2>
+
+  <div class="flow-diagram">
+User Prompt
+    <span class="arrow">↓</span>
+<span class="stage">[1] Metadata Generation</span> <span class="harness">(ToolMetadataClient)</span>
+    <span class="arrow">↓</span>
+<span class="stage">[2] Prompt Refinement</span> <span class="harness">(可选，由 LLM 扩展)</span>
+    <span class="arrow">↓</span>
+<span class="stage">[3] Content Generation</span> <span class="harness">(LLM 写 ContentView.swift)</span>
+    <span class="arrow">↓</span>
+<span class="stage">[4] Source Cleanup</span> <span class="harness">(ContentViewSourceCleanup — 正则清洗)</span>
+    <span class="arrow">↓</span>
+<span class="stage">[5] Compilation + Repair Loop</span> <span class="harness">(ContentViewBuildRepairLoop — 核心 Agent)</span>
+    <span class="arrow">↓</span>
+<span class="stage">[6] App Bundle Packaging</span> <span class="harness">(ToolAppBundleClient — 签名、沙盒、图标)</span>
+    <span class="arrow">↓</span>
+🎉 App Bundle (可直接运行)
+  </div>
+
+  <p>每个阶段都有明确的 <strong>输入契约</strong> 和 <strong>输出契约</strong>，如果输出不符合契约，Controller 会触发回退策略。</p>
+
+  <h3>阶段 1：Metadata Generation（元数据生成）</h3>
+  <p><strong>Agent：</strong> <code>ToolMetadataClient</code></p>
+  <p><strong>输入：</strong> 用户原始 Prompt</p>
+  <p><strong>输出：</strong> 短显示名称 + 图标描述</p>
+  <p><strong>特点：</strong> 可以用轻量级本地模型（如 Apple Foundation Model）做结构化生成，有确定性回退。如果元数据生成失败，不影响后续流程。</p>
+  <div class="highlight">
+    <p>💡 <strong>为什么单独分一个阶段？</strong> 成本优化。元数据不需要 GPT-4 级别的模型，本地小模型就能做，省 API 费用。如果本地模型失败，用确定性回退（如从用户 prompt 中提取关键词）。</p>
+  </div>
+
+  <h3>阶段 2：Prompt Refinement（提示词优化）</h3>
+  <p><strong>Agent：</strong> 可选的 LLM 阶段</p>
+  <p><strong>输入：</strong> 用户原始 Prompt</p>
+  <p><strong>输出：</strong> 扩展后的 Prompt（添加实现细节）</p>
+  <p><strong>控制：</strong> 由 <code>promptRefinementEnabled</code> 标志控制。如果关闭，直接用用户原始 Prompt 进入阶段 3。</p>
+  <div class="highlight">
+    <p>💡 这是一个 "可选 Agent"。如果用户描述很清晰，可以跳过；如果用户描述模糊，LLM 会补充细节（如 "添加搜索和筛选功能"）。</p>
+  </div>
+
+  <h3>阶段 3：Content Generation（核心代码生成）</h3>
+  <p><strong>Agent：</strong> 选中的 LLM（DeepSeek / GPT-4o / Claude 等）</p>
+  <p><strong>输入：</strong> 系统提示（约 40 条约束）+ 优化后的用户 Prompt</p>
+  <p><strong>输出：</strong> 完整的 <code>ContentView.swift</code> 代码</p>
+  <p><strong>关键约束：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>"Write exactly one complete Swift file named ContentView.swift"</li>
+    <li>"Define exactly one View-conforming type: struct ContentView: View"</li>
+    <li>"Do not use ObservableObject, @Published, @StateObject, or @ObservedObject"</li>
+    <li>"Keep state directly inside ContentView with @State properties"</li>
+    <li>"Don't make anything overly complex. The code needs to fit in a single file"</li>
+    <li>"Prefer Apple platform frameworks and native APIs when they fit"</li>
+  </ul>
+  <p>这些约束不是建议，是 <strong>硬性规则</strong>。如果 LLM 违反，阶段 4 的 cleanup 会强制修正。</p>
+
+  <h3>阶段 4：Source Cleanup（源代码清洗）</h3>
+  <p><strong>Harness：</strong> <code>ContentViewSourceCleanup</code>（纯代码，不是 LLM）</p>
+  <p><strong>功能：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>剥离 Markdown 围栏、think 块、脚手架</li>
+    <li>移除 LLM 生成的 App/Preview 块（即使系统提示禁止，LLM 有时仍会添加）</li>
+    <li>规范化 import 语句，修复 macOS SwiftUI 常见陷阱</li>
+    <li>将松散顶层状态移入 ContentView</li>
+    <li>移除错位成员作用域视图块</li>
+    <li>运行 <code>swift-format</code> 统一格式</li>
+  </ul>
+  <div class="highlight">
+    <p>🔧 这是 <strong>Deterministic Harness</strong> 的关键。LLM 输出不可靠，但代码规则的 cleanup 是 100% 可靠的。这是 Ironsmith 稳定性的第一道防线。</p>
+  </div>
+
+  <h3>阶段 5：Compilation + Repair Loop（编译修复循环）</h3>
+  <p><strong>Agent：</strong> <code>ContentViewBuildRepairLoop</code>（最复杂的 Agent）</p>
+  <p>详见 <a href="#repair">第七节</a>。</p>
+
+  <h3>阶段 6：App Bundle Packaging（应用打包）</h3>
+  <p><strong>Agent：</strong> <code>ToolAppBundleClient</code></p>
+  <p><strong>功能：</strong> 构建内部应用包（LSUIElement，无 Dock 图标）或可导出到 /Applications 的完整包。包括签名、沙盒权限、图标生成。</p>
+
+  <div class="divider"></div>
+
+  <!-- 提示词编排 -->
+  <h2 id="prompts">三、提示词编排：系统约束与分层策略</h2>
+
+  <h3>3.1 系统提示的架构：约 40 条约束</h3>
+  <p>Ironsmith 的系统提示不是一段自然语言描述，而是一个 <strong>高度结构化的约束列表</strong>，定义了 LLM 可以做什么和不能做什么。这是架构的边界。</p>
+
+  <div class="prompt-block">
+    <h5>系统提示核心结构（推测，基于 AGENTS.md 约束反推）</h5>
+    <pre><code>You are a SwiftUI developer. Write a single file named ContentView.swift.
+
+[框架规则]
+- Define exactly one struct: ContentView: View
+- Do NOT create @main, App, Preview, or #Preview blocks
+- Do NOT use ObservableObject, @Published, @StateObject, @ObservedObject
+- Keep all state with @State inside ContentView
+- Platform: macOS 26.0+ only
+
+[代码组织]
+Use these sections:
+// MARK: - State
+// MARK: - Body
+// MARK: - Actions
+// MARK: - Helpers
+
+[功能约束]
+- No backend, no analytics, no iCloud
+- No networking unless explicitly requested
+- Use native Apple frameworks when possible
+- Keep it simple enough for a single file
+
+[输出格式]
+Return ONLY Swift source code. No markdown fences.
+No explanation text. No thinking blocks.</code></pre>
+  </div>
+
+  <h3>3.2 分层提示策略：不同 Agent 用不同提示</h3>
+  <p>Ironsmith 不是用一个 "万能提示" 解决所有问题，而是 <strong>每个 Agent 有自己的提示词</strong>。</p>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>📝 ToolMetadataClient（元数据 Agent）</h4>
+      <p>提示词：轻量级，结构化输出（JSON 或 Swift struct）。要求生成短名称和图标描述。</p>
+      <div class="meta">可用本地模型（Apple Foundation Model）或弱 LLM</div>
+    </div>
+    <div class="component-item">
+      <h4>📝 代码生成 Agent（阶段 3）</h4>
+      <p>提示词：约 40 条约束，包含框架规则、代码组织、功能约束、输出格式。是最长的系统提示。</p>
+      <div class="meta">需要强 LLM（GPT-4o / Claude / DeepSeek）</div>
+    </div>
+    <div class="component-item">
+      <h4>📝 修复 Agent（阶段 5）</h4>
+      <p>提示词：包含编译器错误诊断、当前源代码、之前修复的结果（上下文）。要求返回 unified diff 或完整重写。</p>
+      <div class="meta">根据模型能力选择 diff 或 full-rewrite 策略</div>
+    </div>
+    <div class="component-item">
+      <h4>📝 编辑 Agent（Edit Mode）</h4>
+      <p>提示词：包含当前代码 + 用户修改指令。如果模型支持 diff，要求 bounded unified diff；如果不支持，要求完整重写。</p>
+      <div class="meta">diff 策略：减少 token 消耗，保留未修改部分</div>
+    </div>
+  </div>
+
+  <h3>3.3 提示词中的 "负约束" 设计</h3>
+  <p>Ironsmith 的提示词特别注重 <strong>"不要做什么"</strong>，而不是只告诉 LLM "做什么"。这是因为 LLM 有强烈的 "过度工程化" 倾向。</p>
+
+  <div class="highlight">
+    <p><strong>关键负约束：</strong></p>
+    <p>"Do not create preview providers or #Preview blocks" — LLM 经常忍不住加 preview，但 preview 会干扰编译。</p>
+    <p>"Do not append @main to any struct" — LLM 有时会尝试写完整的 App 结构，但 @main 入口由平台提供。</p>
+    <p>"No backend, no analytics, no iCloud" — 明确限制 LLM 的 "想象力"，防止生成过度复杂的架构。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Tool 使用 -->
+  <h2 id="tools">四、Tool 使用：谁有工具调用能力</h2>
+
+  <p>Ironsmith 的架构中，<strong>Tool 的使用方式非常明确</strong>：不是让 LLM 调用外部工具，而是让 <strong>Harness 代码调用 LLM，然后处理输出</strong>。这是 "LLM 作为工具" 而不是 "LLM 使用工具" 的架构。</p>
+
+  <h3>4.1 没有 Tool Calling（Function Calling）</h3>
+  <p>在 Ironsmith 的生成管道中，<strong>LLM 本身不调用外部工具</strong>。LLM 的唯一输出是文本（代码或 diff）。所有工具调用（编译、文件操作、格式化、签名）由 Harness 代码完成。</p>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>🔧 SwiftPackageProcessClient（编译工具）</h4>
+      <p>由 Harness 代码调用，执行 <code>swift build</code>。不是 LLM 调用。</p>
+      <div class="meta">输入：源代码文件 | 输出：编译器诊断信息</div>
+    </div>
+    <div class="component-item">
+      <h4>🔧 swift-format（格式化工具）</h4>
+      <p>由 ContentViewSourceCleanup 调用。纯代码调用。</p>
+      <div class="meta">输入：原始代码 | 输出：格式化后的代码</div>
+    </div>
+    <div class="component-item">
+      <h4>🔧 codesign（签名工具）</h4>
+      <p>由 ToolAppBundleClient 调用。纯代码调用。</p>
+      <div class="meta">输入：app bundle | 输出：签名后的 bundle</div>
+    </div>
+    <div class="component-item">
+      <h4>🔧 xattr（隔离属性清除）</h4>
+      <p>由 ToolAppBundleClient 调用。清除 macOS 的 quarantine 属性。</p>
+      <div class="meta">纯系统调用，与 LLM 无关</div>
+    </div>
+  </div>
+
+  <h3>4.2 LLM 作为 "被调用的工具"</h3>
+  <p>在 Ironsmith 的架构中，LLM 是 <strong>被 Harness 调用的一个能力</strong>，而不是主动调用其他工具的 Agent。</p>
+
+  <div class="flow-diagram">
+Harness 代码（Controller）
+    <span class="arrow">↓ 调用</span>
+<span class="stage">LLM API（生成代码）</span>
+    <span class="arrow">↓ 返回文本</span>
+Harness 代码（处理输出）
+    <span class="arrow">↓ 调用</span>
+<span class="harness">编译工具 / 文件系统 / 格式化工具</span>
+    <span class="arrow">↓ 结果</span>
+Harness 代码（判断下一步）
+  </div>
+
+  <div class="highlight">
+    <p>🔑 <strong>关键设计原则：</strong> LLM 只负责 "生成文本"，Harness 负责 "执行动作"。这种分离避免了 LLM 的幻觉导致危险操作（如删除文件、执行恶意代码）。</p>
+  </div>
+
+  <h3>4.3 唯一的 "Tool" 是 LLM 本身</h3>
+  <p>如果非要定义 Tool，那么 Ironsmith 中唯一的 Tool 是 <strong>LanguageModelClient</strong>，它封装了所有 LLM 调用：</p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li><code>LanguageModelClient</code> — 构造 AnyLanguageModel 会话</li>
+    <li><code>RemoteModelClient</code> — 获取远程模型列表</li>
+    <li><code>OllamaClient</code> — 检测/启动本地 Ollama</li>
+    <li><code>LocalModelClient</code> — 下载 MLX 模型</li>
+  </ul>
+  <p>但这些 "Tool" 是 <strong>供人类用户配置和选择模型</strong> 用的，不是 LLM 在生成过程中调用的。</p>
+
+  <div class="divider"></div>
+
+  <!-- Memory 机制 -->
+  <h2 id="memory">五、Memory 机制：上下文与记忆管理</h2>
+
+  <h3>5.1 没有持久化 Memory（数据库/向量存储）</h3>
+  <p>Ironsmith 的生成管道 <strong>不使用外部记忆系统</strong>（如向量数据库、长期记忆）。所有 "记忆" 都是 <strong>即时上下文（in-context）的</strong>，通过对话历史传递。</p>
+
+  <h3>5.2 三种上下文传递机制</h3>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>📜 对话历史（Conversation History）</h4>
+      <p>在修复循环中，之前的编译错误和修复结果会被包含在下一次请求的上下文中。这让 LLM 能 "学习" 之前的错误模式。</p>
+      <div class="meta">用于：编译修复循环 | 限制：受上下文窗口限制</div>
+    </div>
+    <div class="component-item">
+      <h4>📜 版本暂存（Staged Backup）</h4>
+      <p>编辑模式下，当前代码被暂存到 <code>.ironsmith/versions/pending-ContentView.swift</code>。这是 "短期记忆"，用于编辑失败时恢复。</p>
+      <div class="meta">用于：编辑模式 | 生命周期：一次编辑操作</div>
+    </div>
+    <div class="component-item">
+      <h4>📜 上一版本（Previous Version）</h4>
+      <p>编辑成功后，旧代码被保存为 <code>previous-ContentView.swift</code>。这是 "长期记忆"，允许用户一键恢复。</p>
+      <div class="meta">用于：版本恢复 | 生命周期：直到下一次编辑成功</div>
+    </div>
+  </div>
+
+  <h3>5.3 上下文窗口管理</h3>
+  <p>修复循环中，如果对话历史超过上下文窗口，系统会 <strong>压缩一次</strong>（compact）。如果仍然超过，则触发 <strong>重新生成</strong>（从头开始，丢弃所有修复历史）。</p>
+
+  <div class="highlight">
+    <p>💡 这是一个务实的策略。不追求完美的长期记忆，而是保证 "在当前任务内能完成"。如果记忆太长了，放弃记忆，重新开始。</p>
+  </div>
+
+  <h3>5.4 没有跨任务记忆</h3>
+  <p>Ironsmith 不会记录 "用户之前生成过什么类型的应用" 或 "用户偏好什么风格"。每个生成任务都是独立的。如果需要个性化，用户需要在 Prompt 中明确表达。</p>
+
+  <div class="divider"></div>
+
+  <!-- Harness 详解 -->
+  <h2 id="harness">六、Harness 详解：每个阶段的控制器</h2>
+
+  <p>Harness 是 Ironsmith 架构中最被低估的部分。它不是 "辅助工具"，而是 <strong>确保系统可靠性的核心机制</strong>。</p>
+
+  <h3>6.1 ContentViewSourceCleanup（清洗 Harness）</h3>
+  <p><strong>类型：</strong> 纯代码规则（正则 + AST 操作）</p>
+  <p><strong>职责：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>剥离 Markdown 围栏（<code>```swift</code> 等）</li>
+    <li>移除 think 块（<code>&lt;think&gt;</code> 或 reasoning 内容）</li>
+    <li>移除 LLM 生成的 App/Preview 结构（即使被禁止，LLM 仍会偶尔添加）</li>
+    <li>规范化 import 语句顺序</li>
+    <li>修复常见 macOS SwiftUI 陷阱（如错误的修饰符用法）</li>
+    <li>将松散顶层变量移入 ContentView</li>
+    <li>运行 <code>swift-format</code> 统一格式</li>
+  </ul>
+  <p><strong>为什么重要：</strong> LLM 输出不可靠。即使系统提示说 "不要加 Preview"，LLM 仍有 5-10% 的概率会加。Cleanup 是 100% 可靠的修正层。</p>
+
+  <h3>6.2 ToolGenerationRepairPolicy（策略配置 Harness）</h3>
+  <p><strong>类型：</strong> 配置对象</p>
+  <p><strong>职责：</strong> 定义所有数字阈值和策略预算：</p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>最大生成尝试次数（如 3 次）</li>
+    <li>确定性修复最大轮数（如 5 轮）</li>
+    <li>初始编辑 diff 的 hunk 限制</li>
+    <li>修复 diff 的 hunk 限制</li>
+    <li>无效 patch 的最大容忍次数（stall 阈值）</li>
+    <li>模型修复预算（token 或轮数）</li>
+  </ul>
+  <p><strong>为什么重要：</strong> 防止无限循环。如果没有任何策略限制，修复 Agent 可能在错误震荡中消耗无限 API token。</p>
+
+  <h3>6.3 ToolVersionBackupClient（版本备份 Harness）</h3>
+  <p><strong>类型：</strong> 文件系统操作</p>
+  <p><strong>职责：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>编辑前：将当前代码复制到 <code>pending-ContentView.swift</code></li>
+    <li>编辑成功：将 <code>pending</code> 提升为 <code>previous</code>（旧版本成为备份）</li>
+    <li>编辑失败：从 <code>pending</code> 恢复原始代码，删除暂存</li>
+    <li>路径逃逸检查：确保所有文件操作在包目录内</li>
+  </ul>
+  <p><strong>为什么重要：</strong> 原子性。编辑是一个可能破坏代码的操作，版本备份确保 "要么成功，要么恢复原状"。</p>
+
+  <h3>6.4 SwiftPackageProcessClient（编译 Harness）</h3>
+  <p><strong>类型：</strong> 进程调用</p>
+  <p><strong>职责：</strong> 执行 <code>swift build</code>，捕获 stdout/stderr，解析编译器诊断。</p>
+  <p><strong>输出：</strong> 结构化的 <code>SwiftCompilerDiagnostic</code> 数组，只包含与 <code>ContentView.swift</code> 相关的错误。</p>
+
+  <h3>6.5 AgentDiagnosticsLog（诊断日志 Harness）</h3>
+  <p><strong>类型：</strong> 日志记录</p>
+  <p><strong>职责：</strong> 记录修复循环的每一步（DEBUG 模式，仅本地文件 <code>~/.ironsmith/agent-diagnostics.log</code>）。</p>
+  <p><strong>限制：</strong> 日志紧凑，不存储完整模型响应。仅用于解释修复循环行为。</p>
+
+  <div class="divider"></div>
+
+  <!-- 编译修复循环 -->
+  <h2 id="repair">七、编译-修复循环：最复杂的 Agent</h2>
+
+  <p>这是 Ironsmith 的核心，也是最能回答 "是死循环还是 Agent" 的部分。</p>
+
+  <h3>7.1 流程：不是死循环，是状态机</h3>
+
+  <div class="flow-diagram">
+生成候选代码
+    <span class="arrow">↓</span>
+清洗 + 格式化
+    <span class="arrow">↓</span>
+编译（swift build）
+    <span class="arrow">↓</span>
+解析诊断
+    <span class="arrow">↓</span>
+<span class="stage">确定性修复</span> <span class="harness">(正则规则，最多 N 轮)</span>
+    <span class="arrow">↓ 如果仍有错误</span>
+<span class="stage">模型修复</span> <span class="harness">(LLM 生成 diff，验证后应用)</span>
+    <span class="arrow">↓ 如果仍然失败</span>
+<span class="stage">重新生成</span> <span class="harness">(从头开始，最多 M 次)</span>
+    <span class="arrow">↓ 如果全部失败</span>
+<span class="stage">回退最佳候选</span> <span class="harness">(返回错误最少的那次结果)</span>
+  </div>
+
+  <h3>7.2 确定性修复（Deterministic Repair）</h3>
+  <p><strong>不是 LLM，是代码规则。</strong> 针对常见 Swift/SwiftUI 错误，用正则表达式或 AST 操作自动修复。</p>
+
+  <p><strong>示例修复规则：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>错误的修饰符语法（如 <code>.padding(16)</code> 应为 <code>.padding(16)</code>）</li>
+    <li>缺失的 import（如使用了 <code>WebKit</code> 但没有 <code>import WebKit</code>）</li>
+    <li>常见的 API 不匹配（如错误的初始化器签名）</li>
+  </ul>
+
+  <p><strong>关键设计：</strong> 修复规则必须是 "广泛适用的 Swift 修正"，而不是 "特定应用的实现"。如果修复规则是针对某个特定应用的，它会破坏其他应用。</p>
+
+  <div class="highlight">
+    <p>🛡️ <strong>安全原则：</strong> 每个修复规则都有对应的测试。如果确定性编辑失败，系统是安全的（可以跳过或回滚）。</p>
+  </div>
+
+  <h3>7.3 模型修复（Model Repair）</h3>
+  <p><strong>使用 LLM，但严格控制。</strong></p>
+
+  <p><strong>输入：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>编译器诊断（错误信息 + 行号）</li>
+    <li>当前源代码</li>
+    <li>之前修复的结果（用于避免重复同样的错误）</li>
+  </ul>
+
+  <p><strong>输出格式要求：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li><strong>Unified Diff</strong>（如果模型支持）：只改有问题的部分，保留其他代码</li>
+    <li><strong>完整重写</strong>（如果模型不支持 diff）：重写整个 ContentView.swift</li>
+  </ul>
+
+  <p><strong>验证机制：</strong></p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>应用 diff 后重新编译</li>
+    <li>如果错误数增加 → 回滚（rollback）</li>
+    <li>如果编译结果变成了占位符脚手架 → 回滚</li>
+    <li>如果 patch 无效 → 计数 +1，达到 stall 阈值后放弃模型修复</li>
+  </ul>
+
+  <h3>7.4 重新生成（Regeneration Fallback）</h3>
+  <p>当以下情况发生时，系统放弃修复，从头重新生成：</p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>错误数超过阈值（代码太烂，修不好）</li>
+    <li>确定性修复陷入僵局（循环修复同一错误）</li>
+    <li>模型 patch 反复无效（LLM 无法理解错误）</li>
+    <li>上下文窗口超限（记忆太长，压缩后仍然超限）</li>
+  </ul>
+
+  <p><strong>策略：</strong> 重新生成时保留之前最好的候选（错误最少的那次），如果最终全部失败，返回这个最佳候选而不是彻底失败。</p>
+
+  <div class="highlight">
+    <p>🎯 <strong>核心设计：渐进式回退。</strong> 不是 "成功或失败" 的二元结果，而是 "尽力做到最好，然后返回最好的结果"。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- 编辑模式 -->
+  <h2 id="edit">八、编辑模式：Diff vs. 全量重写</h2>
+
+  <h3>8.1 两种编辑策略</h3>
+  <p>Ironsmith 的编辑模式不是简单地 "把 Prompt 发给 LLM 让它重写"，而是 <strong>根据模型能力选择最优策略</strong>。</p>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>📝 Diff 策略（Bounded Unified Diff）</h4>
+      <p><strong>适用模型：</strong> 支持长上下文和精确编辑的模型（如 GPT-4o、Claude 3.5 Sonnet）</p>
+      <p><strong>流程：</strong></p>
+      <ol style="margin: 8px 0; padding-left: 24px; color: var(--text-muted)">
+        <li>暂存当前代码到 <code>pending-ContentView.swift</code></li>
+        <li>发送 "当前代码 + 修改指令" 给 LLM</li>
+        <li>要求 LLM 返回 unified diff（有明确的修改范围）</li>
+        <li>验证 diff：应用后编译，检查错误</li>
+        <li>成功：promote pending 到 previous</li>
+        <li>失败：从 pending 恢复原始代码</li>
+      </ol>
+      <div class="meta">优点：节省 token（只改需要改的部分）</div>
+    </div>
+    <div class="component-item">
+      <h4>📝 全量重写策略（Full Rewrite）</h4>
+      <p><strong>适用模型：</strong> 不支持 diff 或上下文较短的模型（如本地小模型）</p>
+      <p><strong>流程：</strong></p>
+      <ol style="margin: 8px 0; padding-left: 24px; color: var(--text-muted)">
+        <li>暂存当前代码到 <code>pending-ContentView.swift</code></li>
+        <li>发送 "当前代码 + 修改指令" 给 LLM</li>
+        <li>要求 LLM 返回完整的 ContentView.swift</li>
+        <li>验证：编译，检查错误</li>
+        <li>成功/失败：同上</li>
+      </ol>
+      <div class="meta">缺点：消耗更多 token，但更简单可靠</div>
+    </div>
+  </div>
+
+  <h3>8.2 策略选择：基于模型能力，不是模型名称</h3>
+  <p>这是 Ironsmith 架构的关键设计：<strong>不根据模型名称选择策略，而是根据模型能力</strong>。</p>
+
+  <p><code>ToolRepairStrategy</code> 由 <code>InferenceStore</code> 从 <strong>模型来源和声明的能力</strong> 推导：</p>
+  <ul style="margin: 12px 0; padding-left: 24px; color: var(--text-muted)">
+    <li>模型支持 diff 修复？→ Diff 策略</li>
+    <li>模型只支持全量重写？→ Full Rewrite 策略</li>
+    <li>模型的上下文窗口多大？→ 决定修复预算</li>
+  </ul>
+
+  <div class="highlight">
+    <p>💡 这意味着添加新模型（如 DeepSeek、通义千问）时，不需要改代码，只需要在 ProviderCatalog 中声明能力即可。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- 对比启示 -->
+  <h2 id="compare">九、与 LongMarch 的对比启示</h2>
+
+  <h3>9.1 架构层面的差异</h3>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>🎯 单文件约束</h4>
+      <p>Ironsmith：LLM 只生成 ContentView.swift，框架由平台提供。<br>LongMarch：目前 LLM 生成完整 HTML，但应该约束为只生成 body 内容。</p>
+      <div class="meta">建议：提供固定 HTML 模板，LLM 只填充 body</div>
+    </div>
+    <div class="component-item">
+      <h4>🎯 编译-修复循环</h4>
+      <p>Ironsmith：Swift 编译器 + 确定性修复 + 模型修复。<br>LongMarch：没有验证层，LLM 输出直接保存。</p>
+      <div class="meta">建议：添加 HTML/CSS/JS 语法验证 + 修复循环</div>
+    </div>
+    <div class="component-item">
+      <h4>🎯 确定性 Harness</h4>
+      <p>Ironsmith：ContentViewSourceCleanup 用正则清洗 LLM 输出。<br>LongMarch：没有 cleanup 层，LLM 输出直接存储。</p>
+      <div class="meta">建议：添加 HTML 清洗层（移除 think 块、规范化标签等）</div>
+    </div>
+    <div class="component-item">
+      <h4>🎯 版本历史</h4>
+      <p>Ironsmith：简单的前一版本备份（previous-ContentView.swift）。<br>LongMarch：没有版本历史。</p>
+      <div class="meta">建议：编辑前保存当前版本，支持一键恢复</div>
+    </div>
+    <div class="component-item">
+      <h4>🎯 多模型策略</h4>
+      <p>Ironsmith：根据模型能力选择修复策略（diff vs 重写）。<br>LongMarch：只支持单一模型（DeepSeek）。</p>
+      <div class="meta">建议：支持用户自选模型（BYOK），根据能力选择策略</div>
+    </div>
+  </div>
+
+  <h3>9.2 提示词层面的差异</h3>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4>📝 负约束</h4>
+      <p>Ironsmith：约 40 条约束，其中一半以上是 "不要做什么"。<br>LongMarch：提示词较简短，缺乏负约束。</p>
+      <div class="meta">建议：添加 "不要包含 &lt;html&gt;/&lt;head&gt;" 等负约束</div>
+    </div>
+    <div class="component-item">
+      <h4>📝 分层提示</h4>
+      <p>Ironsmith：不同 Agent 有不同提示（元数据、代码、修复、编辑）。<br>LongMarch：只有一个生成提示。</p>
+      <div class="meta">建议：分离元数据生成和代码生成的提示</div>
+    </div>
+  </div>
+
+  <h3>9.3 最值得立即借鉴的 3 个点</h3>
+
+  <ol style="margin: 16px 0; padding-left: 24px; color: var(--text-muted)">
+    <li><strong>HTML 验证 + 修复循环：</strong> 在保存到数据库之前，用 HTML 解析器验证代码，修复常见错误（未闭合标签、错误嵌套等）。</li>
+    <li><strong>源代码清洗层：</strong> 在 LLM 输出和保存之间，添加一个 cleanup 层，移除 think 块、Markdown 围栏、多余的 HTML 标签。</li>
+    <li><strong>编辑前自动备份：</strong> 用户编辑应用时，自动保存当前版本。如果编辑失败或用户不满意，可以一键恢复。</li>
+  </ol>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考来源：</p>
+    <ul style="padding-left: 20px; margin: 8px 0">
+      <li><a href="https://github.com/Jeidoban/Ironsmith" target="_blank">Ironsmith GitHub 仓库</a> — 主仓库</li>
+      <li><a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — 架构文档（本报告的核心信息源）</li>
+      <li><a href="https://github.com/Jeidoban/Ironsmith/blob/main/CONTRIBUTING.md" target="_blank">CONTRIBUTING.md</a> — 贡献指南，提到项目几乎完全由 Codex 生成</li>
+      <li><a href="https://www.digitaltrends.com/computing/ironsmith-ai-mac-app-builder" target="_blank">Digital Trends 报道</a> — 产品评测</li>
+    </ul>
+    <p style="margin-top: 12px">📝 本报告基于公开源码和架构文档的逆向分析，部分实现细节为合理推测。实际代码可能有所差异。</p>
+  </div>
+
+</div>
+</body>
+</html>

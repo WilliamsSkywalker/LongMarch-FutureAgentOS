@@ -71,6 +71,27 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS user_favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(app_id, user_id),
+    FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS app_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_id INTEGER NOT NULL,
+    version_num INTEGER NOT NULL DEFAULT 1,
+    code TEXT DEFAULT '[]',
+    preview_html TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+  );
+
   CREATE INDEX IF NOT EXISTS idx_apps_author ON apps(author_id);
   CREATE INDEX IF NOT EXISTS idx_apps_public ON apps(is_public);
   CREATE INDEX IF NOT EXISTS idx_apps_created ON apps(created_at);

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ironsmith 应用生成流程 · 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <h1>Ironsmith 应用生成流程</h1>
+  <p class="subtitle">基于 <a href="https://github.com/Jeidoban/Ironsmith" target="_blank">github.com/Jeidoban/Ironsmith</a> AGENTS.md 源码级逆向分析</p>
+
+  <div class="nav-bar">
+    <a href="index.html" class="active">首页</a>
+    <a href="stage1.html">① 元数据生成</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码生成</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复循环</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+    <a href="harness.html">Harness 详解</a>
+  </div>
+
+  <div class="toc">
+    <h3>整体流程图</h3>
+    <img src="../ironsmith_pipeline.png" alt="Ironsmith Pipeline Flowchart" class="flow-img">
+    <p style="font-size:0.85rem;color:var(--text-muted);text-align:center;margin-top:8px">
+      六阶段管道 + 编译修复循环状态机 · 蓝色 = Agent(LLM) · 绿色 = Harness(代码)
+    </p>
+  </div>
+
+  <h2>架构概述</h2>
+
+  <p>Ironsmith 的生成管道不是简单的死循环，而是 <strong>由多个专用 Agent 组成的编排系统</strong>，每个 Agent 有明确的职责边界、输入/输出契约和故障恢复策略。整体由 <code>SingleFileToolGenerationRuntime</code> 这个 orchestrator 调度，但真正的复杂度在 <code>ContentViewBuildRepairLoop</code> 这个 Agent 内部。</p>
+
+  <div class="highlight">
+    <p><strong>核心设计原则：</strong> LLM 只负责 "生成文本"，Harness 代码负责 "执行动作"。这种分离避免了 LLM 的幻觉导致危险操作。LLM 是被 Harness 调用的能力，而不是主动调用工具的主宰。</p>
+  </div>
+
+  <h2>六阶段速览</h2>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4><span class="tag-agent">Agent</span> <a href="stage1.html">① 元数据生成</a></h4>
+      <p><code>ToolMetadataClient</code> — 从用户 Prompt 提取短名称和图标描述。可用轻量级本地模型，失败有确定性回退。</p>
+      <div class="meta">成本优化 · 可并行 · 软增强</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-agent">Agent</span> <a href="stage2.html">② 提示词优化</a></h4>
+      <p><code>Prompt Refinement</code> — 可选阶段。由 LLM 扩展用户描述，添加实现细节。可关闭。</p>
+      <div class="meta">可选 · 模糊描述 → 详细指令</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-agent">Agent</span> <a href="stage3.html">③ 核心代码生成</a></h4>
+      <p><code>SingleFileToolGenerationRuntime</code> — 核心阶段。LLM 在约 40 条约束下生成 <code>ContentView.swift</code>。</p>
+      <div class="meta">最长提示词 · 40+ 约束 · 单文件输出</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> <a href="stage4.html">④ 源码清洗</a></h4>
+      <p><code>ContentViewSourceCleanup</code> — 纯代码规则。剥离 Markdown 围栏、移除 Preview 块、修复陷阱、格式化。</p>
+      <div class="meta">100% 确定性 · 第一道可靠性防线</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-agent">Agent</span> <a href="stage5.html">⑤ 编译修复循环</a></h4>
+      <p><code>ContentViewBuildRepairLoop</code> — 最复杂 Agent。编译 → 确定性修复 → 模型修复(diff) → 验证 → 重新生成。</p>
+      <div class="meta">状态机 · 渐进回退 · 保留最佳候选</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> <a href="stage6.html">⑥ 应用打包</a></h4>
+      <p><code>ToolAppBundleClient</code> — 签名、沙盒、图标、原子替换、隔离属性清除。</p>
+      <div class="meta">Release 构建 · 安全发布</div>
+    </div>
+  </div>
+
+  <h2>关键问题回答</h2>
+
+  <h3>1. 核心：死循环 vs. Agent Harness？</h3>
+  <p>不是死循环。是 <strong>Controller + Specialized Agents + Deterministic Harness</strong> 三层架构：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li><strong>Controller</strong>（<code>SingleFileToolGenerationRuntime</code>）— 项目经理，知道流程</li>
+    <li><strong>Specialized Agents</strong> — 各专业工程师，有独立提示词和记忆策略</li>
+    <li><strong>Deterministic Harness</strong> — 质检员 + 安全员，用代码规则保护系统</li>
+  </ul>
+
+  <h3>2. Tool 使用：谁有工具调用能力？</h3>
+  <p><strong>LLM 不调用外部工具。</strong> LLM 的唯一输出是文本（代码或 diff）。所有工具调用（编译、文件操作、格式化、签名）由 Harness 代码完成。LLM 是 "被调用的能力"，不是 "调用工具的主体"。</p>
+
+  <h3>3. Memory 机制：上下文与记忆</h3>
+  <p><strong>没有持久化 Memory。</strong> 所有记忆都是即时上下文：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li><strong>对话历史</strong> — 修复循环中的错误和修复结果</li>
+    <li><strong>版本暂存</strong> — 编辑时的 <code>pending-ContentView.swift</code></li>
+    <li><strong>上一版本</strong> — 成功的 <code>previous-ContentView.swift</code></li>
+  </ul>
+  <p>上下文超限时：压缩一次 → 如果还超，重新生成（丢弃记忆）。</p>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考来源：<a href="https://github.com/Jeidoban/Ironsmith" target="_blank">Ironsmith GitHub</a> · <a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a></p>
+    <p>📝 本报告基于公开源码和架构文档的逆向分析，部分实现细节为合理推测。</p>
+  </div>
+
+</div>
+</body>
+</html>

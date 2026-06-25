@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阶段③ · 核心代码生成 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>阶段③ · 核心代码生成</h1>
+  <p class="subtitle">SingleFileToolGenerationRuntime · 40+ 约束 · 单文件输出</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html">① 元数据</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html" class="active">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+  </div>
+
+  <span class="stage-badge agent">Agent（LLM 驱动）· 核心 · 最长提示词</span>
+
+  <h2>职责</h2>
+  <p>生成应用的 <strong>唯一可编辑文件</strong>：<code>ContentView.swift</code>。在约 40 条约束下，LLM 输出完整的 SwiftUI 代码。这是整个管道中最关键的 Agent。</p>
+
+  <h2>源码结构</h2>
+  <pre><code>// SingleFileToolGenerationRuntime.swift
+// 职责：六阶段管道 orchestrator，协调元数据→生成→清洗→修复→打包
+
+struct SingleFileToolGenerationRuntime {
+    let metadataClient: ToolMetadataClient
+    let languageModel: LanguageModel
+    let cleanup: ContentViewSourceCleanup
+    let repairLoop: ContentViewBuildRepairLoop
+    let bundleClient: ToolAppBundleClient
+    
+    // 主入口：Create Mode
+    func generateTool(from userPrompt: String) async -> GenerationResult {
+        // Stage 1: Metadata
+        let metadata = await metadataClient.generateMetadata(from: userPrompt)
+        
+        // Stage 2: Optional Refinement
+        let refinedPrompt = await promptRefinement(userPrompt)
+        
+        // Stage 3: Content Generation
+        let rawCode = await generateContentView(
+            prompt: refinedPrompt,
+            metadata: metadata
+        )
+        
+        // Stage 4: Source Cleanup
+        let cleanedCode = cleanup.clean(rawCode)
+        
+        // Stage 5: Compilation + Repair Loop
+        let (finalCode, success) = await repairLoop.buildAndRepair(
+            code: cleanedCode,
+            packageName: metadata.displayName
+        )
+        
+        guard success else {
+            return .failure(.repairFailed)
+        }
+        
+        // Stage 6: App Bundle Packaging
+        let appBundle = await bundleClient.buildBundle(
+            code: finalCode,
+            metadata: metadata
+        )
+        
+        return .success(appBundle)
+    }
+    
+    // 核心：代码生成
+    private func generateContentView(
+        prompt: String,
+        metadata: ToolMetadata
+    ) async -> String {
+        
+        let systemPrompt = ToolGenerationPrompts.singleFileCodingInstructions
+        
+        let userPrompt = """
+        Build a macOS utility app: \(metadata.displayName)
+        
+        \(prompt)
+        """
+        
+        return await languageModel.chat(
+            system: systemPrompt,
+            user: userPrompt
+        )
+    }
+}</code></pre>
+
+  <h2>完整系统提示词（40+ 约束）</h2>
+  <p>这是 Ironsmith 架构的核心。以下提示词基于 AGENTS.md 中的约束列表反推，包含所有框架规则、代码组织、负约束和输出格式要求。</p>
+
+  <div class="prompt-block">
+    <h5>系统提示：单文件 SwiftUI 编码指令（完整版）</h5>
+    <pre><code>// ============================================================
+// Ironsmith ToolGenerationPrompts.singleFileCodingInstructions
+// 约 40 条约束，定义 LLM 的输出边界
+// ============================================================
+
+You are an expert SwiftUI developer for macOS 26.0+.
+Your task is to write a single, complete SwiftUI view file.
+
+=== FRAMEWORK RULES ===
+1. Write exactly ONE file named ContentView.swift
+2. Define exactly ONE struct: struct ContentView: View
+3. Do NOT create @main, App, Preview, or #Preview blocks
+4. Do NOT use ObservableObject, @Published, @StateObject, or @ObservedObject
+5. Keep ALL state with @State properties inside ContentView
+6. Do NOT create additional files or modules
+7. Do NOT append @main to any struct
+8. Platform: macOS 26.0+ only (not iOS, not iPadOS)
+9. Prefer Apple platform frameworks (Foundation, SwiftUI, AppKit) over 3rd-party
+
+=== CODE ORGANIZATION ===
+10. Use these section MARKs when possible:
+    // MARK: - State
+    // MARK: - Body
+    // MARK: - Actions
+    // MARK: - Helpers
+11. Keep the Body compact; extract helper views and methods
+12. All state must be declared in ContentView, not top-level
+
+=== FUNCTIONAL CONSTRAINTS (NEGATIVE) ===
+13. Do NOT add analytics, telemetry, or tracking
+14. Do NOT add backend, server, or API calls unless explicitly requested
+15. Do NOT add iCloud, CloudKit, or sync features
+16. Do NOT add auth, login, or user accounts
+17. Do NOT add onboarding, tutorials, or help screens
+18. Do NOT add settings/preferences unless explicitly requested
+19. Do NOT make anything overly complex — code must fit in a single file
+20. Do NOT add network requests unless the user explicitly asked for data fetching
+
+=== STATE MANAGEMENT ===
+21. Use @State for local view state
+22. Use @State var isPresented for sheet/modal state
+23. Use @FocusState for focus management
+24. Use AppStorage ONLY for small user preferences (not primary data)
+
+=== UI/UX PATTERNS ===
+25. Prefer native macOS controls: List, Form, Toolbar, Menu
+26. Use .navigationTitle() for window titles
+27. Use .frame(minWidth:idealWidth:maxWidth:) for responsive layout
+28. Use proper SwiftUI layout: HStack, VStack, ZStack, Grid
+29. Support dark mode by default (system background colors)
+30. Use SF Symbols for icons: Image(systemName: "...")
+
+=== OUTPUT FORMAT ===
+31. Return ONLY Swift source code
+32. No markdown fences (no ```swift)
+33. No explanation text before or after code
+34. No thinking blocks or reasoning text
+35. No comments explaining obvious code (self-documenting code preferred)
+36. No TODO, FIXME, or placeholder comments
+37. No imports beyond what's needed (remove unused imports)
+
+=== COMPLEXITY BOUNDARY ===
+38. If the user's request is too complex, simplify it to fit in a single file
+39. Prefer focused utilities over full applications
+40. One screen = one ContentView; do not create multi-screen navigation</code></pre>
+  </div>
+
+  <h2>约束分析</h2>
+
+  <table class="constraint-table">
+    <tr>
+      <th>约束类型</th>
+      <th>数量</th>
+      <th>目的</th>
+    </tr>
+    <tr>
+      <td>框架规则</td>
+      <td>9</td>
+      <td>确保代码在 Ironsmith 的固定脚手架内运行</td>
+    </tr>
+    <tr>
+      <td>代码组织</td>
+      <td>3</td>
+      <td>统一代码风格，便于解析和修复</td>
+    </tr>
+    <tr>
+      <td>负约束（不要做什么）</td>
+      <td>8</td>
+      <td>防止 LLM 过度工程化，保持单文件</td>
+    </tr>
+    <tr>
+      <td>状态管理</td>
+      <td>4</td>
+      <td>统一使用 @State，避免复杂模式</td>
+    </tr>
+    <tr>
+      <td>UI/UX</td>
+      <td>6</td>
+      <td>确保 macOS 原生体验</td>
+    </tr>
+    <tr>
+      <td>输出格式</td>
+      <td>7</td>
+      <td>确保输出可被机器解析，减少 cleanup 工作量</td>
+    </tr>
+    <tr>
+      <td>复杂度边界</td>
+      <td>3</td>
+      <td>防止 LLM 生成超出单文件能力的内容</td>
+    </tr>
+  </table>
+
+  <h2>为什么 "负约束" 比 "正约束" 更重要</h2>
+
+  <p>LLM 的训练数据包含大量 "完整应用" 的代码，所以 LLM 有强烈的倾向去添加：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li>Preview 块（方便开发调试）</li>
+    <li>App 结构（完整的应用入口）</li>
+    <li>ObservableObject（MVVM 模式）</li>
+    <li>网络请求（从后端获取数据）</li>
+    <li>Analytics（追踪用户行为）</li>
+    <li>Onboarding（首次使用引导）</li>
+  </ul>
+
+  <p>但在 Ironsmith 的架构中，这些都是 <strong>不允许的</strong>。因为：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li>Preview 和 App 结构由平台固定脚手架提供</li>
+    <li>ObservableObject 在单文件模式下增加复杂度</li>
+    <li>网络请求需要权限配置，超出单文件范围</li>
+    <li>Analytics 和 Onboarding 不是核心功能</li>
+  </ul>
+
+  <div class="highlight">
+    <p>🔑 <strong>核心洞察：</strong> Ironsmith 的提示词设计不是 "教 LLM 怎么写 SwiftUI"，而是 "定义 LLM 的输出边界"。约 60% 的约束是 "不要做什么"，而不是 "要做什么"。</p>
+  </div>
+
+  <h2>对 LongMarch 的启示</h2>
+
+  <p>如果我们要为 LongMarch 设计类似的系统提示，应该：</p>
+
+  <div class="prompt-block">
+    <h5>LongMarch 单文件 HTML 编码指令（参考设计）</h5>
+    <pre><code>=== FRAMEWORK RULES ===
+1. Write only the content inside &lt;body&gt; tags
+2. Do NOT include &lt;html&gt;, &lt;head&gt;, &lt;body&gt; tags — the platform provides them
+3. Do NOT include &lt;script src="..."&gt; for external libraries — use inline JS only
+4. Do NOT include CSS link tags — the platform provides Tailwind CSS
+
+=== CSS RULES ===
+5. Use the platform's CSS variables: --primary, --surface, --accent, --text
+6. Prefer inline &lt;style&gt; or Tailwind classes over external CSS
+7. Dark theme is default; use color: var(--text) for text
+
+=== JS RULES ===
+8. Use vanilla JavaScript only (no frameworks)
+9. All code in a single &lt;script&gt; block at the end of body
+10. Do NOT use eval() or document.write()
+
+=== NEGATIVE CONSTRAINTS ===
+11. Do NOT add backend, server, or API calls
+12. Do NOT add analytics, tracking, or cookies
+13. Do NOT add auth, login, or user accounts
+14. Do NOT add external links or redirects
+15. Do NOT make overly complex — keep it focused
+
+=== OUTPUT FORMAT ===
+16. Return ONLY the HTML content (what goes inside &lt;body&gt;)
+17. No markdown fences
+18. No explanation text
+19. Include both HTML structure and inline &lt;style&gt; + &lt;script&gt;</code></pre>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — "The core prompt is a system-level instruction set of ~40 constraints..."</p>
+  </div>
+
+</div>
+</body>
+</html>

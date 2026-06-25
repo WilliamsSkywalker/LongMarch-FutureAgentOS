@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阶段⑤ · 编译修复循环 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>阶段⑤ · 编译修复循环</h1>
+  <p class="subtitle">ContentViewBuildRepairLoop · 核心 Agent · 状态机</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html">① 元数据</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html" class="active">⑤ 编译修复</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+  </div>
+
+  <span class="stage-badge agent">Agent（LLM 驱动）· 最复杂 · 状态机</span>
+
+  <h2>职责</h2>
+  <p>这是 Ironsmith 最复杂的 Agent。它不是一个简单的 "while(有错误) { 修复 }" 死循环，而是一个 <strong>有策略、有预算、有回退的状态机</strong>。</p>
+
+  <h2>状态机源码</h2>
+  <pre><code>// ContentViewBuildRepairLoop.swift
+// 职责：编译-修复-验证-回退的完整状态机
+
+struct ContentViewBuildRepairLoop {
+    let policy: ToolGenerationRepairPolicy
+    let compiler: SwiftPackageProcessClient
+    let languageModel: LanguageModel
+    let strategy: ToolRepairStrategy
+    
+    // 主入口
+    func buildAndRepair(code: String, packageName: String) async -> (String, Bool) {
+        var bestCode = code
+        var bestErrorCount = Int.max
+        
+        for generationAttempt in 1...policy.maxGenerationAttempts {
+            // 1. 生成候选（第一次用传入的 code，后续重新生成）
+            let candidate = generationAttempt == 1 ? code : await regenerateFromScratch()
+            
+            // 2. 编译 + 修复循环
+            let (repairedCode, errorCount) = await compileAndRepairLoop(
+                code: candidate,
+                generationAttempt: generationAttempt
+            )
+            
+            // 3. 跟踪最佳候选
+            if errorCount < bestErrorCount {
+                bestCode = repairedCode
+                bestErrorCount = errorCount
+            }
+            
+            // 4. 如果完全编译成功，提前退出
+            if errorCount == 0 {
+                return (repairedCode, true)
+            }
+        }
+        
+        // 5. 返回最佳候选（即使仍有错误）
+        return (bestCode, bestErrorCount == 0)
+    }
+    
+    // MARK: - 编译+修复循环
+    private func compileAndRepairLoop(
+        code: String,
+        generationAttempt: Int
+    ) async -> (String, Int) {
+        var currentCode = code
+        var currentErrors = Int.max
+        var stablePassCount = 0
+        
+        // 1. 初始编译
+        let (initialErrors, diagnostics) = await compile(currentCode)
+        currentErrors = initialErrors
+        
+        // 2. 确定性修复循环（纯代码规则）
+        for pass in 1...policy.maxDeterministicPasses {
+            let (newCode, newErrors) = await applyDeterministicRepairs(
+                code: currentCode,
+                errors: diagnostics,
+                pass: pass
+            )
+            
+            if newErrors < currentErrors {
+                // 修复有效，更新状态
+                currentCode = newCode
+                currentErrors = newErrors
+                stablePassCount = 0
+            } else if newErrors == currentErrors {
+                // 稳定一次
+                stablePassCount += 1
+                if stablePassCount >= policy.stablePassThreshold {
+                    break  // 修复陷入僵局
+                }
+            } else {
+                // 修复使错误增加 → 回滚
+                break
+            }
+            
+            if currentErrors == 0 { break }
+        }
+        
+        // 3. 模型修复（使用 LLM）
+        if currentErrors > 0 && strategy.supportsModelRepair {
+            var invalidPatchCount = 0
+            
+            for repairAttempt in 1...policy.maxModelRepairAttempts {
+                // 获取当前编译诊断
+                let (_, freshDiagnostics) = await compile(currentCode)
+                
+                // 请求 LLM 生成修复
+                let patch = await requestModelRepair(
+                    code: currentCode,
+                    diagnostics: freshDiagnostics,
+                    attempt: repairAttempt
+                )
+                
+                // 验证 patch
+                let (patchedCode, patchedErrors) = await applyAndVerifyPatch(
+                    patch: patch,
+                    code: currentCode
+                )
+                
+                if patchedErrors < currentErrors {
+                    // Patch 有效
+                    currentCode = patchedCode
+                    currentErrors = patchedErrors
+                    invalidPatchCount = 0
+                } else {
+                    // Patch 无效或使错误增加 → 回滚
+                    invalidPatchCount += 1
+                    if invalidPatchCount >= policy.invalidPatchStallThreshold {
+                        break  // 模型修复陷入僵局
+                    }
+                }
+                
+                if currentErrors == 0 { break }
+                
+                // 检查上下文窗口
+                if isContextWindowExceeded() {
+                    compactConversation()
+                    if isContextWindowExceeded() {
+                        break  // 上下文超限，放弃模型修复
+                    }
+                }
+            }
+        }
+        
+        return (currentCode, currentErrors)
+    }
+    
+    // MARK: - 编译
+    private func compile(_ code: String) async -> (errorCount: Int, diagnostics: [CompilerDiagnostic]) {
+        // 写入临时文件
+        writeToTemporaryFile(code)
+        
+        // 调用 swift build
+        let output = await compiler.build()
+        
+        // 解析编译器输出
+        let diagnostics = parseCompilerOutput(output)
+        
+        // 只过滤 ContentView.swift 相关的错误
+        let relevantDiagnostics = diagnostics.filter {
+            $0.file.contains("ContentView.swift")
+        }
+        
+        return (relevantDiagnostics.count, relevantDiagnostics)
+    }
+    
+    // MARK: - 确定性修复
+    private func applyDeterministicRepairs(
+        code: String,
+        errors: [CompilerDiagnostic],
+        pass: Int
+    ) async -> (String, Int) {
+        var modifiedCode = code
+        
+        for error in errors {
+            // 根据错误类型匹配修复规则
+            if let fix = DeterministicRepairRules.match(error) {
+                modifiedCode = fix.apply(to: modifiedCode)
+            }
+        }
+        
+        // 重新编译验证
+        let (newErrors, _) = await compile(modifiedCode)
+        return (modifiedCode, newErrors)
+    }
+    
+    // MARK: - 模型修复
+    private func requestModelRepair(
+        code: String,
+        diagnostics: [CompilerDiagnostic],
+        attempt: Int
+    ) async -> String {
+        
+        let systemPrompt = """
+        You are a Swift compiler repair assistant. Given Swift compiler errors
+        and the source code, generate a fix. You must return a unified diff
+        showing ONLY the changes needed.
+        """
+        
+        let userPrompt = """
+        The following Swift code has compiler errors. Please fix them.
+        
+        === COMPILER ERRORS ===
+        \(diagnostics.map { "\($0.file):\($0.line): \($0.message)" }.joined(separator: "\n"))
+        
+        === CURRENT SOURCE CODE ===
+        \(code)
+        
+        === PREVIOUS REPAIR ATTEMPTS ===
+        \(attempt > 1 ? "Attempt \(attempt - 1) was unsuccessful." : "This is the first attempt.")
+        
+        === RULES ===
+        - Return ONLY a unified diff (patch format)
+        - Do NOT return the full file
+        - Only modify ContentView.swift
+        - Do NOT change any other files
+        - Do NOT add new features, only fix errors
+        - Make minimal changes to resolve the errors
+        """
+        
+        return await languageModel.chat(
+            system: systemPrompt,
+            user: userPrompt
+        )
+    }
+    
+    // MARK: - Patch 验证
+    private func applyAndVerifyPatch(
+        patch: String,
+        code: String
+    ) async -> (String, Int) {
+        // 1. 解析 diff，应用到代码
+        let patchedCode = applyDiff(patch: patch, to: code)
+        
+        // 2. 重新编译
+        let (errorCount, _) = await compile(patchedCode)
+        
+        // 3. 检查是否变成了占位符
+        if isPlaceholderScaffold(patchedCode) {
+            // Patch 把代码替换成了空模板 → 无效
+            return (code, Int.max)
+        }
+        
+        return (patchedCode, errorCount)
+    }
+    
+    // MARK: - 重新生成
+    private func regenerateFromScratch() async -> String {
+        // 触发条件：错误过多 / 修复僵局 / 上下文超限
+        // 返回全新的 ContentView.swift
+        return await generateContentView(prompt: originalUserPrompt)
+    }
+    
+    // MARK: - 上下文管理
+    private func isContextWindowExceeded() -> Bool {
+        return conversationTokenCount > languageModel.contextWindow * 0.9
+    }
+    
+    private func compactConversation() {
+        // 压缩对话历史：保留错误摘要，丢弃完整的模型响应
+        // 只保留：编译错误列表 + 最终代码，丢弃中间尝试
+    }
+}</code></pre>
+
+  <h2>修复策略配置</h2>
+  <pre><code>// ToolGenerationRepairPolicy.swift
+// 所有数字阈值和策略预算的集中配置
+
+struct ToolGenerationRepairPolicy {
+    // 最大生成尝试次数（从头重新生成）
+    let maxGenerationAttempts: Int = 3
+    
+    // 确定性修复最大轮数
+    let maxDeterministicPasses: Int = 5
+    
+    // 稳定通过阈值（连续多少次修复无进展 → 停止）
+    let stablePassThreshold: Int = 2
+    
+    // 模型修复最大尝试次数
+    let maxModelRepairAttempts: Int = 5
+    
+    // 无效 patch 的 stall 阈值（连续多少次 patch 无效 → 停止）
+    let invalidPatchStallThreshold: Int = 3
+    
+    // 初始编辑 diff 的 hunk 限制
+    let initialEditHunkLimit: Int = 10
+    
+    // 修复 diff 的 hunk 限制
+    let repairHunkLimit: Int = 5
+    
+    // 模型修复预算（token 或轮数）
+    let modelRepairBudget: Int = 2000
+    
+    // 错误数阈值：超过则触发重新生成
+    let errorCountRegenerationThreshold: Int = 20
+}</code></pre>
+
+  <h2>确定性修复规则示例</h2>
+  <pre><code>// DeterministicRepairRules.swift
+// 常见 Swift/SwiftUI 编译错误的确定性修复
+
+enum DeterministicRepairRules {
+    
+    // 规则 1：错误的 .frame 修饰符
+    case frameModifierSyntax
+    // 修复：.frame(width: 100, height: 200) → .frame(width: 100, height: 200)
+    // LLM 有时写成 .frame(width:height:) 没有参数
+    
+    static func match(_ diagnostic: CompilerDiagnostic) -> RepairRule? {
+        switch diagnostic.message {
+        case let msg where msg.contains("Missing argument for parameter"):
+            if msg.contains("frame") {
+                return .frameModifierSyntax
+            }
+            
+        case let msg where msg.contains("Cannot find 'ObservableObject' in scope"):
+            // LLM 使用了 ObservableObject，但系统提示禁止
+            return .removeObservableObject
+            
+        case let msg where msg.contains("Cannot find 'PreviewProvider' in scope"):
+            // PreviewProvider 残留
+            return .removePreviewProvider
+            
+        case let msg where msg.contains("No exact matches in call to initializer"):
+            // 初始化器签名错误
+            return .fixInitializer
+            
+        case let msg where msg.contains("Type 'View' has no member"):
+            // 修饰符错误（如 iOS 专用修饰符在 macOS 上不存在）
+            return .replaceModifier
+            
+        default:
+            return nil
+        }
+    }
+    
+    func apply(to code: String) -> String {
+        switch self {
+        case .frameModifierSyntax:
+            return code.replacingOccurrences(
+                of: ".frame(width: height:)",
+                with: ".frame(width: 100, height: 100)"
+            )
+            
+        case .removeObservableObject:
+            // 移除 ObservableObject 相关代码，转换为 @State
+            return convertObservableObjectToState(code)
+            
+        case .removePreviewProvider:
+            return code.replacingOccurrences(
+                of: "struct.*PreviewProvider.*\\{.*?\\}",
+                with: "",
+                options: .regularExpression
+            )
+            
+        case .fixInitializer:
+            // 根据上下文推断正确的初始化器
+            return fixInitializerByContext(code)
+            
+        case .replaceModifier:
+            // 替换为 macOS 等效修饰符
+            return replaceWithMacOSEquivalent(code)
+        }
+    }
+}</code></pre>
+
+  <h2>模型修复提示词（Diff 格式）</h2>
+
+  <div class="prompt-block">
+    <h5>系统提示（System Prompt）</h5>
+    <pre><code>You are a Swift compiler repair assistant. You fix Swift compiler errors
+by generating minimal unified diff patches.
+
+Rules:
+- Return ONLY a unified diff in standard patch format
+- Do NOT return the full file or full rewritten code
+- Only modify ContentView.swift
+- Do NOT add new features, only fix errors
+- Make the MINIMAL changes necessary to resolve the errors
+- If the error requires removing code, show it as removed lines (-)
+- If the error requires adding code, show it as added lines (+)
+- Include 3 lines of context around each change</code></pre>
+  </div>
+
+  <div class="prompt-block">
+    <h5>用户提示（User Prompt）示例</h5>
+    <pre><code>The following Swift code has compiler errors. Please fix them.
+
+=== COMPILER ERRORS ===
+ContentView.swift:15: Cannot find 'List' in scope
+ContentView.swift:23: Cannot find 'NavigationStack' in scope
+ContentView.swift:45: Missing argument for parameter 'content' in call
+
+=== CURRENT SOURCE CODE ===
+import SwiftUI
+
+struct ContentView: View {
+    var body: some View {
+        List(items) { item in  // Error: Cannot find 'List' in scope
+            NavigationStack {  // Error: NavigationStack not available on macOS
+                Text(item.name)
+            }
+        }
+        .sheet(isPresented: $showSheet)  // Error: Missing argument for parameter 'content'
+    }
+}
+
+=== PREVIOUS REPAIR ATTEMPTS ===
+This is the first attempt.
+
+=== RULES ===
+- Return ONLY a unified diff (patch format)
+- Do NOT return the full file
+- Only modify ContentView.swift
+- Make minimal changes to resolve the errors</code></pre>
+  </div>
+
+  <div class="prompt-block">
+    <h5>预期输出（Unified Diff）</h5>
+    <pre><code>--- ContentView.swift
++++ ContentView.swift
+@@ -1,6 +1,7 @@
+ import SwiftUI
++import AppKit
+ 
+ struct ContentView: View {
+     var body: some View {
+-        List(items) { item in
++        List(items, id: \.self) { item in
+-            NavigationStack {
++            NavigationView {
+                 Text(item.name)
+             }
+         }
+-        .sheet(isPresented: $showSheet)
++        .sheet(isPresented: $showSheet) {
++            Text("Sheet Content")
++        }</code></pre>
+  </div>
+
+  <h2>关键设计决策</h2>
+
+  <h4>为什么用 Diff 而不是 Full Rewrite？</h4>
+  <p><strong>节省 Token。</strong> 如果让 LLM 返回完整的重写文件，每次修复都要消耗 ~5k-10k tokens（取决于文件大小）。而 Diff 只返回修改的部分，通常只有几百 tokens。</p>
+
+  <h4>为什么 Diff 需要验证？</h4>
+  <p>LLM 生成的 Diff 可能：<br>
+  - 行号错误（context 不匹配）<br>
+  - 语法错误（添加了不匹配的括号）<br>
+  - 过度修改（改了不需要改的地方）<br>
+  所以应用 Diff 后必须重新编译，如果错误增加则回滚。</p>
+
+  <h4>为什么有 "重新生成" 回退？</h4>
+  <p>如果修复循环陷入僵局（确定性修复无效、模型修复也无效），说明原始代码太差，修复成本高于重新生成。此时从头开始，但保留之前最好的候选。</p>
+
+  <div class="highlight">
+    <p>🎯 <strong>核心设计：渐进式回退。</strong> 不是 "成功或失败" 的二元结果，而是 "尽力做到最好，然后返回最好的结果"。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — "ContentViewBuildRepairLoop owns compile/repair/regeneration..."</p>
+  </div>
+
+</div>
+</body>
+</html>

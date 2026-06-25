@@ -68,6 +68,16 @@ router.post('/', authMiddleware, (req: AuthRequest, res) => {
 
     const app = db.prepare('SELECT * FROM apps WHERE id = ?').get(result.lastInsertRowid) as App
 
+    // Save initial version to app_versions
+    db.prepare(
+      'INSERT INTO app_versions (app_id, version_num, code, preview_html, description) VALUES (?, 1, ?, ?, ?)'
+    ).run(
+      result.lastInsertRowid,
+      appCode,
+      appPreview,
+      description
+    )
+
     res.status(201).json({
       app: {
         ...app,
@@ -77,6 +87,195 @@ router.post('/', authMiddleware, (req: AuthRequest, res) => {
     })
   } catch (err: any) {
     console.error('POST /apps error:', err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// PUT /apps/:id — Update an app (with version backup)
+router.put('/:id', authMiddleware, (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId
+    const { id } = req.params
+    const { name, description, icon, tags, code, preview_html, is_public } = req.body
+
+    const app = db.prepare('SELECT * FROM apps WHERE uuid = ?').get(id) as App | undefined
+    if (!app) {
+      res.status(404).json({ error: 'App not found' })
+      return
+    }
+
+    if (app.author_id !== userId) {
+      res.status(403).json({ error: 'Not authorized to update this app' })
+      return
+    }
+
+    // 1. Backup current version to app_versions
+    const latestVersion = db.prepare(
+      'SELECT MAX(version_num) as max_version FROM app_versions WHERE app_id = ?'
+    ).get(app.id) as { max_version: number | null } | undefined
+    const nextVersion = (latestVersion?.max_version || 0) + 1
+
+    db.prepare(
+      'INSERT INTO app_versions (app_id, version_num, code, preview_html, description) VALUES (?, ?, ?, ?, ?)'
+    ).run(
+      app.id,
+      nextVersion,
+      app.code,
+      app.preview_html,
+      app.description
+    )
+
+    // 2. Update app
+    const updateFields: string[] = []
+    const updateValues: any[] = []
+
+    if (name !== undefined) { updateFields.push('name = ?'); updateValues.push(name) }
+    if (description !== undefined) { updateFields.push('description = ?'); updateValues.push(description) }
+    if (icon !== undefined) { updateFields.push('icon = ?'); updateValues.push(icon) }
+    if (tags !== undefined) { updateFields.push('tags = ?'); updateValues.push(JSON.stringify(tags)) }
+    if (code !== undefined) { updateFields.push('code = ?'); updateValues.push(JSON.stringify(code)) }
+    if (preview_html !== undefined) { updateFields.push('preview_html = ?'); updateValues.push(preview_html) }
+    if (is_public !== undefined) { updateFields.push('is_public = ?'); updateValues.push(is_public ? 1 : 0) }
+    updateFields.push('updated_at = CURRENT_TIMESTAMP')
+
+    if (updateFields.length > 0) {
+      db.prepare(`UPDATE apps SET ${updateFields.join(', ')} WHERE id = ?`).run(...updateValues, app.id)
+    }
+
+    const updatedApp = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as App
+
+    res.json({
+      app: {
+        ...updatedApp,
+        tags: JSON.parse(updatedApp.tags as unknown as string),
+        code: JSON.parse(updatedApp.code as unknown as string),
+      },
+      version_backup: {
+        version_num: nextVersion,
+        saved_at: new Date().toISOString(),
+      },
+    })
+  } catch (err: any) {
+    console.error('PUT /apps/:id error:', err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /apps/:id/versions — Get version history
+router.get('/:id/versions', (req, res) => {
+  try {
+    const { id } = req.params
+
+    const app = db.prepare('SELECT id FROM apps WHERE uuid = ?').get(id) as { id: number } | undefined
+    if (!app) {
+      res.status(404).json({ error: 'App not found' })
+      return
+    }
+
+    const versions = db.prepare(
+      'SELECT id, version_num, created_at FROM app_versions WHERE app_id = ? ORDER BY version_num DESC LIMIT 20'
+    ).all(app.id) as { id: number; version_num: number; created_at: string }[]
+
+    res.json({ versions })
+  } catch (err: any) {
+    console.error('GET /apps/:id/versions error:', err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /apps/:id/restore — Restore a previous version
+router.post('/:id/restore', authMiddleware, (req: AuthRequest, res) => {
+  try {
+    const userId = req.user!.userId
+    const { id } = req.params
+    const { version_num } = req.body
+
+    if (!version_num || typeof version_num !== 'number') {
+      res.status(400).json({ error: 'version_num is required' })
+      return
+    }
+
+    const app = db.prepare('SELECT * FROM apps WHERE uuid = ?').get(id) as App | undefined
+    if (!app) {
+      res.status(404).json({ error: 'App not found' })
+      return
+    }
+
+    if (app.author_id !== userId) {
+      res.status(403).json({ error: 'Not authorized to restore this app' })
+      return
+    }
+
+    // Get the version to restore
+    const version = db.prepare(
+      'SELECT * FROM app_versions WHERE app_id = ? AND version_num = ?'
+    ).get(app.id, version_num) as { code: string; preview_html: string; description: string } | undefined
+
+    if (!version) {
+      res.status(404).json({ error: 'Version not found' })
+      return
+    }
+
+    // Backup current version before restoring
+    const latestVersion = db.prepare(
+      'SELECT MAX(version_num) as max_version FROM app_versions WHERE app_id = ?'
+    ).get(app.id) as { max_version: number | null } | undefined
+    const nextVersion = (latestVersion?.max_version || 0) + 1
+
+    db.prepare(
+      'INSERT INTO app_versions (app_id, version_num, code, preview_html, description) VALUES (?, ?, ?, ?, ?)'
+    ).run(app.id, nextVersion, app.code, app.preview_html, app.description)
+
+    // Restore
+    db.prepare(
+      'UPDATE apps SET code = ?, preview_html = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(version.code, version.preview_html, version.description, app.id)
+
+    const restoredApp = db.prepare('SELECT * FROM apps WHERE id = ?').get(app.id) as App
+
+    res.json({
+      app: {
+        ...restoredApp,
+        tags: JSON.parse(restoredApp.tags as unknown as string),
+        code: JSON.parse(restoredApp.code as unknown as string),
+      },
+      restored_from: version_num,
+      new_backup_version: nextVersion,
+    })
+  } catch (err: any) {
+    console.error('POST /apps/:id/restore error:', err)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /apps/:id/versions/:versionNum — Get a specific version
+router.get('/:id/versions/:versionNum', (req, res) => {
+  try {
+    const { id, versionNum } = req.params
+
+    const app = db.prepare('SELECT id FROM apps WHERE uuid = ?').get(id) as { id: number } | undefined
+    if (!app) {
+      res.status(404).json({ error: 'App not found' })
+      return
+    }
+
+    const version = db.prepare(
+      'SELECT * FROM app_versions WHERE app_id = ? AND version_num = ?'
+    ).get(app.id, parseInt(versionNum)) as { id: number; version_num: number; code: string; preview_html: string; description: string; created_at: string } | undefined
+
+    if (!version) {
+      res.status(404).json({ error: 'Version not found' })
+      return
+    }
+
+    res.json({
+      version: {
+        ...version,
+        code: JSON.parse(version.code as unknown as string),
+      },
+    })
+  } catch (err: any) {
+    console.error('GET /apps/:id/versions/:versionNum error:', err)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

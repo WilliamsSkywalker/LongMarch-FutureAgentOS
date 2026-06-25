@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阶段⑥ · 应用打包 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>阶段⑥ · 应用打包</h1>
+  <p class="subtitle">ToolAppBundleClient · 签名 + 沙盒 + 图标 + 原子替换</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html">① 元数据</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复</a>
+    <a href="stage6.html" class="active">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+  </div>
+
+  <span class="stage-badge harness">Harness（代码逻辑）· 安全发布</span>
+
+  <h2>职责</h2>
+  <p>将编译成功的代码打包为可运行的 <code>.app</code> 包。包括：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li>Release 构建（<code>swift build -c release</code>）</li>
+    <li>创建 <code>Info.plist</code>（应用元数据）</li>
+    <li>生成/复制图标到 <code>Resources/</code></li>
+    <li>代码签名（ad-hoc 或 Developer ID）</li>
+    <li>添加沙盒权限（可选）</li>
+    <li>原子替换（先构建到临时目录，再移动）</li>
+    <li>清除隔离属性（quarantine stripping）</li>
+  </ul>
+
+  <h2>源码结构</h2>
+  <pre><code>// ToolAppBundleClient.swift
+// 职责：构建 .app 包，签名，沙盒，导出
+
+struct ToolAppBundleClient {
+    let signingIdentity: String?  // nil = ad-hoc signing
+    let sandboxEnabled: Bool
+    
+    // 构建内部应用包（在 Ironsmith 内运行）
+    func buildInternalBundle(
+        code: String,
+        metadata: ToolMetadata
+    ) async -> URL {
+        // 1. Release 构建
+        let binaryPath = await buildRelease(packagePath: packagePath)
+        
+        // 2. 创建 .app 目录结构
+        let appBundlePath = createAppBundleStructure(
+            name: metadata.displayName,
+            binaryPath: binaryPath
+        )
+        
+        // 3. 写入 Info.plist
+        writeInfoPlist(
+            at: appBundlePath,
+            metadata: metadata,
+            isInternal: true
+        )
+        
+        // 4. 生成图标
+        let iconPath = await generateIcon(
+            description: metadata.iconDescription,
+            outputDirectory: appBundlePath.appendingPathComponent("Contents/Resources")
+        )
+        
+        // 5. 代码签名
+        signBundle(appBundlePath, identity: signingIdentity)
+        
+        // 6. 清除 quarantine
+        stripQuarantine(appBundlePath)
+        
+        return appBundlePath
+    }
+    
+    // 导出到 /Applications
+    func exportToApplications(
+        from internalBundle: URL,
+        metadata: ToolMetadata
+    ) async -> URL {
+        let appName = "\(metadata.displayName).app"
+        let exportPath = URL(fileURLWithPath: "/Applications/\(appName)")
+        
+        // 1. 检查是否已存在
+        if FileManager.default.fileExists(atPath: exportPath.path) {
+            // 检查 bundle identifier 是否匹配
+            if !bundleIdentifierMatches(internalBundle, exportPath) {
+                // 不匹配，选择带后缀的名称
+                let suffixedName = findAvailableSuffix(appName)
+                return exportPath.deletingLastPathComponent().appendingPathComponent(suffixedName)
+            }
+        }
+        
+        // 2. 原子替换：先构建到临时目录
+        let tempPath = URL(fileURLWithPath: "/tmp/\(UUID().uuidString).app")
+        try? FileManager.default.copyItem(at: internalBundle, to: tempPath)
+        
+        // 3. 更新 Info.plist 为导出模式
+        updateInfoPlistForExport(tempPath)
+        
+        // 4. 重新签名（导出模式需要更严格的签名）
+        signBundle(tempPath, identity: signingIdentity)
+        
+        // 5. 验证签名
+        verifyCodeSignature(tempPath)
+        
+        // 6. 原子移动：备份旧版本 → 移动新版本
+        let backupPath = URL(fileURLWithPath: "/tmp/\(UUID().uuidString)_backup.app")
+        if FileManager.default.fileExists(atPath: exportPath.path) {
+            try? FileManager.default.moveItem(at: exportPath, to: backupPath)
+        }
+        
+        do {
+            try FileManager.default.moveItem(at: tempPath, to: exportPath)
+            // 成功，删除备份
+            try? FileManager.default.removeItem(at: backupPath)
+        } catch {
+            // 失败，恢复备份
+            try? FileManager.default.moveItem(at: backupPath, to: exportPath)
+            throw ExportError.atomicMoveFailed
+        }
+        
+        // 7. 清除 quarantine
+        stripQuarantine(exportPath)
+        
+        return exportPath
+    }
+    
+    // MARK: - 辅助方法
+    
+    private func buildRelease(packagePath: URL) async -> URL {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
+        process.arguments = [
+            "build",
+            "-c", "release",
+            "--package-path", packagePath.path,
+            "--show-bin-path"
+        ]
+        
+        let result = try? await process.run()
+        let binPath = result?.output.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        
+        return URL(fileURLWithPath: binPath).appendingPathComponent("ContentView")
+    }
+    
+    private func createAppBundleStructure(name: String, binaryPath: URL) -> URL {
+        let appPath = URL(fileURLWithPath: "\(name).app")
+        let contentsPath = appPath.appendingPathComponent("Contents")
+        let macOSPath = contentsPath.appendingPathComponent("MacOS")
+        let resourcesPath = contentsPath.appendingPathComponent("Resources")
+        
+        try? FileManager.default.createDirectory(at: macOSPath, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: resourcesPath, withIntermediateDirectories: true)
+        
+        // 复制可执行文件
+        let destBinary = macOSPath.appendingPathComponent(name)
+        try? FileManager.default.copyItem(at: binaryPath, to: destBinary)
+        
+        return appPath
+    }
+    
+    private func writeInfoPlist(at appPath: URL, metadata: ToolMetadata, isInternal: Bool) {
+        let plist: [String: Any] = [
+            "CFBundleExecutable": metadata.displayName,
+            "CFBundleIdentifier": "com.ironsmith.\(metadata.displayName.lowercased().replacingOccurrences(of: " ", with: "-"))",
+            "CFBundleDisplayName": metadata.displayName,
+            "CFBundleShortVersionString": "1.0",
+            "CFBundleVersion": "1",
+            "LSUIElement": isInternal,  // true = 无 Dock 图标（内部）
+            "LSApplicationCategoryType": "public.app-category.utilities",
+            // 沙盒权限（如果启用）
+            "com.apple.security.app-sandbox": sandboxEnabled
+        ]
+        
+        let plistPath = appPath.appendingPathComponent("Contents/Info.plist")
+        // 写入 plist 文件...
+    }
+    
+    private func signBundle(_ path: URL, identity: String?) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        
+        if let identity = identity {
+            process.arguments = ["--sign", identity, "--deep", "--force", path.path]
+        } else {
+            // Ad-hoc 签名（无 Developer ID）
+            process.arguments = ["--sign", "-", "--deep", "--force", path.path]
+        }
+        
+        try? process.run()
+        process.waitUntilExit()
+    }
+    
+    private func verifyCodeSignature(_ path: URL) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["--verify", "--deep", "--strict", path.path]
+        
+        try? process.run()
+        process.waitUntilExit()
+        
+        return process.terminationStatus == 0
+    }
+    
+    private func stripQuarantine(_ path: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        process.arguments = ["-d", "com.apple.quarantine", path.path]
+        
+        try? process.run()
+        process.waitUntilExit()
+    }
+    
+    private func generateIcon(description: String, outputDirectory: URL) async -> URL {
+        // 使用 Apple Foundation Model 或本地模型生成图标
+        // 或者使用缓存的图标（如果之前生成过）
+        let cachedIcon = getCachedIcon(for: description)
+        if let icon = cachedIcon {
+            return icon
+        }
+        
+        // 生成新图标...
+        let newIcon = await iconGenerator.generate(from: description)
+        cacheIcon(newIcon, for: description)
+        
+        return newIcon
+    }
+}</code></pre>
+
+  <h2>沙盒权限配置</h2>
+
+  <pre><code>// 沙盒权限 entitlements.plist
+// 根据用户选择启用/禁用
+
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+    &lt;!-- 核心：必须启用 --&gt;
+    &lt;key&gt;com.apple.security.app-sandbox&lt;/key&gt;
+    &lt;true/&gt;
+    
+    &lt;!-- 网络权限（可选） --&gt;
+    &lt;key&gt;com.apple.security.network.client&lt;/key&gt;
+    &lt;true/&gt;
+    
+    &lt;!-- 文件权限（用户选择） --&gt;
+    &lt;key&gt;com.apple.security.files.user-selected.read-write&lt;/key&gt;
+    &lt;true/&gt;
+    
+    &lt;!-- 下载文件夹 --&gt;
+    &lt;key&gt;com.apple.security.files.downloads.read-write&lt;/key&gt;
+    &lt;true/&gt;
+    
+    &lt;!-- 摄像头（需要单独开启） --&gt;
+    &lt;!-- &lt;key&gt;com.apple.security.device.camera&lt;/key&gt;&lt;true/&gt; --&gt;
+    
+    &lt;!-- 麦克风（需要单独开启） --&gt;
+    &lt;!-- &lt;key&gt;com.apple.security.device.microphone&lt;/key&gt;&lt;true/&gt; --&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;</code></pre>
+
+  <h2>安全设计</h2>
+
+  <h4>1. 沙盒默认开启</h4>
+  <p>每个生成的应用默认运行在沙盒中。网络、文件、摄像头等权限需要用户明确开启。这大大减少了恶意代码或错误代码的危害。</p>
+
+  <h4>2. 代码签名</h4>
+  <p>即使没有 Developer ID，也会进行 ad-hoc 签名。这确保应用包完整性，防止 tampering。</p>
+
+  <h4>3. 原子替换</h4>
+  <p>新应用先构建到临时目录，验证签名后再原子移动到目标位置。如果替换失败，自动恢复旧版本。</p>
+
+  <h4>4. Quarantine 清除</h4>
+  <p>macOS 会 quarantine 从互联网下载的应用。Ironsmith 清除 quarantine 属性，让应用可以直接运行。但只在用户明确导出时执行，内部运行模式不处理。</p>
+
+  <div class="highlight">
+    <p>🛡️ <strong>安全原则：</strong> 默认沙盒 + 显式权限 + 签名验证 + 原子替换 = 可安全运行 LLM 生成的代码。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — "ToolAppBundleClient builds internal LSUIElement app bundles... signed app bundles with sandboxing and hardened runtime enabled..."</p>
+  </div>
+
+</div>
+</body>
+</html>

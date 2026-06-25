@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>编辑模式 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>编辑模式</h1>
+  <p class="subtitle">Edit Mode · Diff vs. 全量重写 · 版本暂存</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html">① 元数据</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html" class="active">编辑模式</a>
+  </div>
+
+  <span class="stage-badge agent">Agent（LLM 驱动）· 两种策略</span>
+
+  <h2>编辑模式 vs. 创建模式</h2>
+  <p>编辑模式不是 "重新创建"，而是 <strong>在现有代码上做修改</strong>。这要求：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li>保留现有代码的结构和状态</li>
+    <li>只修改与用户需求相关的部分</li>
+    <li>失败时能恢复原始版本</li>
+  </ul>
+
+  <h2>源码结构</h2>
+  <pre><code>// EditMode.swift
+// 职责：在现有应用上执行修改
+
+struct EditMode {
+    let strategy: ToolRepairStrategy
+    let versionBackup: ToolVersionBackupClient
+    let repairLoop: ContentViewBuildRepairLoop
+    
+    // 主入口：编辑现有应用
+    func editTool(
+        tool: Tool,
+        modificationPrompt: String
+    ) async -> EditResult {
+        
+        // 1. 读取当前代码
+        let currentCode = readContentView(from: tool)
+        
+        // 2. 暂存当前版本（原子备份）
+        versionBackup.stagePendingVersion(
+            code: currentCode,
+            for: tool
+        )
+        
+        // 3. 根据策略选择编辑方式
+        let editedCode: String
+        
+        switch strategy {
+        case .diffRepair:
+            // 模型支持 Diff：发送 bounded unified diff 请求
+            editedCode = await editWithDiff(
+                currentCode: currentCode,
+                modification: modificationPrompt
+            )
+            
+        case .fullRewrite:
+            // 模型不支持 Diff：发送完整重写请求
+            editedCode = await editWithFullRewrite(
+                currentCode: currentCode,
+                modification: modificationPrompt
+            )
+        }
+        
+        // 4. 编译验证（复用修复循环）
+        let (finalCode, success) = await repairLoop.buildAndRepair(
+            code: editedCode,
+            packageName: tool.displayName
+        )
+        
+        if success {
+            // 5. 成功：提升暂存版本为 "previous"（备份旧版本）
+            versionBackup.promotePendingToPrevious(for: tool)
+            
+            // 6. 写入最终代码
+            writeContentView(finalCode, to: tool)
+            
+            return .success
+        } else {
+            // 7. 失败：从 pending 恢复原始代码
+            let originalCode = versionBackup.restorePendingVersion(for: tool)
+            writeContentView(originalCode, to: tool)
+            
+            versionBackup.discardPendingVersion(for: tool)
+            
+            return .failure(.editFailed)
+        }
+    }
+    
+    // MARK: - Diff 策略
+    private func editWithDiff(
+        currentCode: String,
+        modification: String
+    ) async -> String {
+        
+        let systemPrompt = """
+        You are a precise code editor. Given a user's modification request
+        and the current source code, generate a minimal unified diff
+        that implements the change.
+        """
+        
+        let userPrompt = """
+        Current code (ContentView.swift):
+        \(currentCode)
+        
+        User's modification request:
+        \(modification)
+        
+        Generate a unified diff that implements this change.
+        Rules:
+        - Only modify ContentView.swift
+        - Make minimal changes
+        - Include 3 lines of context around each change
+        - Do NOT change unrelated code
+        """
+        
+        let diff = await languageModel.chat(
+            system: systemPrompt,
+            user: userPrompt
+        )
+        
+        // 解析 diff 并应用到代码
+        return applyDiff(diff: diff, to: currentCode)
+    }
+    
+    // MARK: - 全量重写策略
+    private func editWithFullRewrite(
+        currentCode: String,
+        modification: String
+    ) async -> String {
+        
+        let systemPrompt = ToolGenerationPrompts.singleFileCodingInstructions
+        
+        let userPrompt = """
+        You are editing an existing app. Here is the current code:
+        
+        \(currentCode)
+        
+        The user wants to modify it:
+        \(modification)
+        
+        Return the COMPLETE updated ContentView.swift with the modification applied.
+        Preserve all existing functionality that wasn't mentioned for modification.
+        """
+        
+        return await languageModel.chat(
+            system: systemPrompt,
+            user: userPrompt
+        )
+    }
+}
+
+// 版本备份客户端
+struct ToolVersionBackupClient {
+    
+    func stagePendingVersion(code: String, for tool: Tool) {
+        let pendingPath = tool.versionsDirectory
+            .appendingPathComponent("pending-ContentView.swift")
+        writeFile(code, to: pendingPath)
+    }
+    
+    func promotePendingToPrevious(for tool: Tool) {
+        let pendingPath = tool.versionsDirectory
+            .appendingPathComponent("pending-ContentView.swift")
+        let previousPath = tool.versionsDirectory
+            .appendingPathComponent("previous-ContentView.swift")
+        
+        // 如果已有 previous，删除旧的
+        if fileExists(previousPath) {
+            deleteFile(previousPath)
+        }
+        
+        // 将 pending 提升为 previous
+        moveFile(from: pendingPath, to: previousPath)
+    }
+    
+    func restorePendingVersion(for tool: Tool) -> String {
+        let pendingPath = tool.versionsDirectory
+            .appendingPathComponent("pending-ContentView.swift")
+        return readFile(pendingPath)
+    }
+    
+    func discardPendingVersion(for tool: Tool) {
+        let pendingPath = tool.versionsDirectory
+            .appendingPathComponent("pending-ContentView.swift")
+        deleteFile(pendingPath)
+    }
+    
+    // 用户手动恢复上一版本
+    func restorePreviousVersion(for tool: Tool) -> String {
+        let previousPath = tool.versionsDirectory
+            .appendingPathComponent("previous-ContentView.swift")
+        let currentPath = tool.sourceFilePath
+        
+        let previousCode = readFile(previousPath)
+        let currentCode = readFile(currentPath)
+        
+        // 交换：previous → current，current → previous
+        writeFile(previousCode, to: currentPath)
+        writeFile(currentCode, to: previousPath)
+        
+        return previousCode
+    }
+}</code></pre>
+
+  <h2>两种策略对比</h2>
+
+  <table class="constraint-table">
+    <tr>
+      <th>维度</th>
+      <th>Diff 策略</th>
+      <th>全量重写策略</th>
+    </tr>
+    <tr>
+      <td>适用模型</td>
+      <td>支持长上下文 + 精确编辑（GPT-4o, Claude 3.5）</td>
+      <td>不支持 diff 或上下文较短的模型</td>
+    </tr>
+    <tr>
+      <td>Token 消耗</td>
+      <td>低（只返回修改部分）</td>
+      <td>高（返回完整文件）</td>
+    </tr>
+    <tr>
+      <td>上下文使用</td>
+      <td>高效（只传必要部分）</td>
+      <td>需要完整文件在上下文中</td>
+    </tr>
+    <tr>
+      <td>风险</td>
+      <td>Diff 解析可能失败</td>
+      <td>可能意外修改无关代码</td>
+    </tr>
+    <tr>
+      <td>验证</td>
+      <td>应用后编译，错误增加则回滚</td>
+      <td>直接编译，错误增加则回滚</td>
+    </tr>
+  </table>
+
+  <h2>策略选择：基于模型能力</h2>
+  <p>这是 Ironsmith 的关键设计：<strong>不根据模型名称选择策略，而是根据模型能力</strong>。</p>
+
+  <pre><code>// ToolRepairStrategy.swift
+// 由 InferenceStore 从模型来源和能力推导
+
+enum ToolRepairStrategy {
+    case diffRepair       // 支持 unified diff
+    case fullRewrite      // 只支持完整重写
+    
+    static func infer(from model: ModelConfig) -> ToolRepairStrategy {
+        // 基于模型来源和能力判断
+        switch model.providerIdentifier {
+        case "openai", "anthropic":
+            // GPT-4o, Claude 3.5 支持 diff
+            return .diffRepair
+            
+        case "ollama", "mlx":
+            // 本地模型通常不支持 diff
+            return .fullRewrite
+            
+        case "apple.foundation":
+            // Apple Foundation Model 能力最弱
+            return .fullRewrite
+            
+        default:
+            // 未知模型，保守选择
+            return .fullRewrite
+        }
+    }
+}</code></pre>
+
+  <h2>版本历史设计</h2>
+  <p>Ironsmith 的版本历史不是 Git，而是 <strong>简单的前一版本备份</strong>：</p>
+
+  <pre><code>// 版本文件结构
+~/.ironsmith/tools/MyApp/.ironsmith/versions/
+├── pending-ContentView.swift      // 编辑中的暂存版本
+└── previous-ContentView.swift     // 上一次成功的版本（用于恢复）
+
+// 编辑流程
+[编辑前]  current → pending (暂存)
+[编辑成功] pending → previous (旧版成为备份), current = 新版
+[编辑失败] pending → current (恢复), discard pending</code></pre>
+
+  <div class="highlight">
+    <p>💡 <strong>设计哲学：</strong> 不要过度工程化。一个备份就够了。用户不需要完整的 Git 历史，只需要 "撤销最后一次编辑"。</p>
+  </div>
+
+  <h2>对 LongMarch 的启示</h2>
+  <p>LongMarch 的编辑模式应该：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li>编辑前保存当前版本到数据库</li>
+    <li>支持 "撤销编辑" 功能</li>
+    <li>根据模型能力选择 diff 或全量重写</li>
+    <li>不要追求完整的 Git 历史，一个备份就够了</li>
+  </ul>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — "Edit mode stages the current ContentView.swift... model-diff capable selections start with a bounded unified diff..."</p>
+  </div>
+
+</div>
+</body>
+</html>

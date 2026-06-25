@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI App 生成竞品全景分析 · LongMarch 架构选型</title>
+<style>
+:root { --bg:#0a0a0a; --surface:#141414; --surface2:#1a1a1a; --border:#2a2a2a; --text:#fafafa; --muted:#a1a1aa; --accent:#D4A843; --primary:#8B1A1A; --link:#D4A843; --code:#0d0d0d; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif; background:var(--bg); color:var(--text); line-height:1.7; padding:40px 20px; }
+.container { max-width:1100px; margin:0 auto; }
+h1 { font-size:2.2rem; font-weight:700; margin-bottom:8px; }
+.subtitle { color:var(--muted); font-size:1rem; margin-bottom:40px; }
+h2 { font-size:1.5rem; font-weight:600; margin:40px 0 16px; padding-bottom:8px; border-bottom:1px solid var(--border); color:var(--accent); }
+h3 { font-size:1.2rem; font-weight:600; margin:28px 0 12px; }
+h4 { font-size:1rem; font-weight:600; margin:20px 0 8px; color:var(--muted); }
+p { margin-bottom:12px; color:var(--muted); }
+.highlight { background:var(--surface2); border-left:3px solid var(--accent); padding:16px 20px; margin:16px 0; border-radius:0 8px 8px 0; }
+.highlight p { color:var(--text); margin:0; }
+.tag { display:inline-block; background:var(--primary); color:#fff; padding:2px 10px; border-radius:4px; font-size:0.75rem; font-weight:500; margin-right:6px; }
+.tag-green { background:#1a2e1a; color:#6ab76a; border:1px solid #3a5e3a; }
+.tag-blue { background:#1a1a2e; color:#8a8aff; border:1px solid #3a3a5e; }
+.tag-orange { background:#2e1a0a; color:#e8a040; border:1px solid #5e3a1a; }
+.tag-gray { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
+pre { background:var(--code); border:1px solid var(--border); border-radius:8px; padding:20px; overflow-x:auto; margin:16px 0; font-size:0.85rem; line-height:1.6; }
+pre code { background:transparent; padding:0; color:var(--text); }
+code { font-family:'SF Mono','JetBrains Mono',monospace; background:var(--code); padding:2px 6px; border-radius:4px; font-size:0.9em; color:var(--accent); }
+.toc { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:20px 24px; margin-bottom:40px; }
+.toc h3 { margin:0 0 12px; font-size:1rem; }
+.toc ul { list-style:none; padding:0; }
+.toc li { margin:6px 0; }
+.toc a { color:var(--muted); font-size:0.9rem; text-decoration:none; }
+.toc a:hover { color:var(--accent); }
+a { color:var(--link); text-decoration:none; }
+a:hover { text-decoration:underline; }
+table { width:100%; border-collapse:collapse; margin:16px 0; font-size:0.85rem; }
+th { text-align:left; padding:10px 12px; background:var(--surface2); color:var(--accent); font-weight:600; border-bottom:1px solid var(--border); }
+td { padding:10px 12px; border-bottom:1px solid var(--border); color:var(--muted); vertical-align:top; }
+tr:hover td { background:var(--surface2); }
+.score { font-size:1.2rem; font-weight:700; }
+.score-high { color:#22c55e; }
+.score-mid { color:var(--accent); }
+.score-low { color:#ef4444; }
+.recommendation { background:var(--primary); background:linear-gradient(135deg,var(--primary) 0%,#5a0f0f 100%); border-radius:8px; padding:24px; margin:24px 0; }
+.recommendation h3 { margin:0 0 12px; color:#fff; font-size:1.1rem; }
+.recommendation p { color:rgba(255,255,255,0.85); margin:0; }
+.recommendation .tag { background:rgba(255,255,255,0.2); color:#fff; }
+.divider { height:1px; background:var(--border); margin:40px 0; }
+.footnote { font-size:0.8rem; color:var(--muted); margin-top:60px; padding-top:20px; border-top:1px solid var(--border); }
+.arch-diagram { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:24px; margin:20px 0; font-family:'SF Mono',monospace; font-size:0.8rem; line-height:2; color:var(--muted); overflow-x:auto; }
+.arch-diagram .arrow { color:var(--accent); }
+.arch-diagram .stage { color:var(--text); font-weight:600; }
+.arch-diagram .harness { color:#6ab76a; }
+.arch-diagram .agent { color:#8a8aff; }
+@media (max-width:640px) { h1{font-size:1.6rem;} h2{font-size:1.2rem;} body{padding:20px 12px;} table{font-size:0.75rem;} td,th{padding:6px 8px;} }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>AI App 生成竞品全景分析</h1>
+<p class="subtitle">基于 KroWork / 灵光 / Ironsmith / Lovable / v0 / Bolt 的架构对比 · LongMarch 选型参考</p>
+
+<div class="toc">
+<h3>📋 目录</h3>
+<ul>
+<li><a href="#overview">一、竞品全景概览</a></li>
+<li><a href="#kro">二、快手 KroWork 深度分析</a></li>
+<li><a href="#ling">三、蚂蚁灵光 深度分析</a></li>
+<li><a href="#ironsmith">四、Ironsmith 深度分析</a></li>
+<li><a href="#western">五、西方竞品：Lovable / v0 / Bolt</a></li>
+<li><a href="#wechat">六、微信生态现状</a></li>
+<li><a href="#compare">七、六维度对比矩阵</a></li>
+<li><a href="#recommend">八、LongMarch 架构推荐</a></li>
+<li><a href="#roadmap">九、实施路线图</a></li>
+</ul>
+</div>
+
+<h2 id="overview">一、竞品全景概览</h2>
+
+<p>2025-2026 年是 "AI 应用生成" 赛道爆发期。我们调研了 6 个核心竞品，覆盖中美两个市场、桌面/移动/Web 三个平台：</p>
+
+<table>
+<tr>
+<th>产品</th>
+<th>公司</th>
+<th>平台</th>
+<th>核心定位</th>
+<th>上线时间</th>
+<th>用户规模</th>
+</tr>
+<tr>
+<td><strong>KroWork</strong></td>
+<td>快手</td>
+<td>桌面 (macOS/Win)</td>
+<td>AI 桌面智能体 · 应用固化</td>
+<td>2026.04</td>
+<td>未公开</td>
+</tr>
+<tr>
+<td><strong>灵光</strong></td>
+<td>蚂蚁集团</td>
+<td>移动端 (iOS/Android)</td>
+<td>30秒生成闪应用 · 全模态</td>
+<td>2025.11</td>
+<td>3000万+ 闪应用</td>
+</tr>
+<tr>
+<td><strong>Ironsmith</strong></td>
+<td>独立开发者</td>
+<td>桌面 (macOS)</td>
+<td>开源 · 菜单栏 · 本地编译</td>
+<td>2026.04</td>
+<td>200+ stars</td>
+</tr>
+<tr>
+<td><strong>Lovable</strong></td>
+<td>Lovable Dev</td>
+<td>Web</td>
+<td>非技术创始人 · 全栈 SaaS</td>
+<td>2024</td>
+<td>数十万用户</td>
+</tr>
+<tr>
+<td><strong>v0</strong></td>
+<td>Vercel</td>
+<td>Web</td>
+<td>组件级 · React/Next.js</td>
+<td>2024</td>
+<td>数百万用户</td>
+</tr>
+<tr>
+<td><strong>Bolt</strong></td>
+<td>StackBlitz</td>
+<td>Web</td>
+<td>浏览器 IDE · 全栈原型</td>
+<td>2024</td>
+<td>数百万用户</td>
+</tr>
+</table>
+
+<div class="highlight">
+<p><strong>关键洞察：</strong> 中国市场走 "移动原生 + 超级 App 生态" 路线（灵光依附支付宝生态），美国市场走 "Web 全栈 + 独立部署" 路线（Lovable/Bolt/v0）。桌面端只有 Ironsmith 和 KroWork 在做。</p>
+</div>
+
+<h2 id="kro">二、快手 KroWork 深度分析</h2>
+
+<p><strong>核心创新：</strong> "应用固化"（App Solidification）— 从一次性 AI 生成到永久本地资产。</p>
+
+<h3>生成链路</h3>
+<div class="arch-diagram">
+用户描述 (自然语言)
+    <span class="arrow">↓</span>
+<span class="agent">AI 智能体 (Kro) · 多模型调度</span>
+    <span class="arrow">↓</span>
+<span class="stage">任务规划 → 代码生成 → 界面搭建</span>
+    <span class="arrow">↓</span>
+<span class="harness">环境配置 → 依赖安装 → 应用打包</span>
+    <span class="arrow">↓</span>
+<span class="stage">桌面可执行文件 (.app / .exe)</span>
+    <span class="arrow">↓</span>
+<span class="stage">【应用固化】→ 永久本地资产</span>
+</div>
+
+<h3>关键特性</h3>
+
+<h4>1. 应用固化（App Solidification）</h4>
+<p>用户首次使用时，AI 生成应用并运行。如果用户觉得好用，可以"固化"为本地应用。固化后：</p>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>代码在本地运行 — <strong>零 Token 消耗</strong></li>
+<li>AI 按固化指令精准执行 — <strong>输出稳定一致</strong></li>
+<li>数据留在本地 — <strong>安全</strong></li>
+<li>支持开机自启和系统级管理</li>
+</ul>
+
+<h4>2. 多模型集成</h4>
+<p>国内版：Qwen、Kimi、DeepSeek<br>
+国际版：OpenAI、Anthropic<br>
+根据任务自动选择最佳模型。</p>
+
+<h4>3. 沙盒安全</h4>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>沙箱隔离执行</li>
+<li>权限管控（触碰沙箱外需用户同意）</li>
+<li>白盒可见（每一步都可查看）</li>
+</ul>
+
+<h4>4. 不限于应用生成</h4>
+<p>文件处理、浏览器自动化、文档生成、数据分析 — 能根据需求选择最佳执行方式。</p>
+
+<h3>架构优劣势</h3>
+<table>
+<tr><th>优势</th><th>劣势</th></tr>
+<tr>
+<td>✅ 本地运行，零后续成本</td>
+<td>❌ 仅限桌面端</td>
+</tr>
+<tr>
+<td>✅ 应用固化后稳定一致</td>
+<td>❌ 需要安装客户端</td>
+</tr>
+<tr>
+<td>✅ 数据安全不上云</td>
+<td>❌ 跨设备同步困难</td>
+</tr>
+<tr>
+<td>✅ 多模型自动调度</td>
+<td>❌ 社区分享能力弱</td>
+</tr>
+</table>
+
+<h3>对 LongMarch 的启示</h3>
+<p><strong>"应用固化"概念可以借鉴。</strong> 当前 LongMarch 每次运行都重新从数据库读取 HTML，如果加上"预编译/缓存"机制，可以加速运行。但 Web 端天然无法做到"零 Token 消耗"（每次运行都在浏览器里解析 HTML，不需要 LLM）。</p>
+
+<div class="divider"></div>
+
+<h2 id="ling">三、蚂蚁灵光 深度分析</h2>
+
+<p><strong>核心创新：</strong> "闪应用"（Flash Apps）— 30 秒生成、全代码生成、原生能力集成、手机端全流程闭环。</p>
+
+<h3>生成链路</h3>
+<div class="arch-diagram">
+用户描述 (自然语言 / 图片 / 语音)
+    <span class="arrow">↓</span>
+<span class="agent">多智能体协作 · 动态调度</span>
+    <span class="arrow">↓</span>
+<span class="stage">意图理解 → 代码生成 → 原生能力绑定</span>
+    <span class="arrow">↓</span>
+<span class="harness">渲染引擎 → 交互测试 → 参数化配置</span>
+    <span class="arrow">↓</span>
+<span class="stage">可交互闪应用 (HTML5 / 小程序)</span>
+    <span class="arrow">↓</span>
+<span class="stage">【灵光圈】社区分享 + 二次创作</span>
+</div>
+
+<h3>关键特性</h3>
+
+<h4>1. 全代码生成（不是模板填充）</h4>
+<p>提取自然语言关键词，调用知识自动编写代码。30 秒生成可交互轻量应用。</p>
+
+<h4>2. 手机端原生能力集成</h4>
+<p>2026年4月升级后，闪应用可以调用：</p>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>相机、相册、陀螺仪</li>
+<li>LBS（基于位置的服务）</li>
+<li>震动反馈</li>
+<li>音效合成</li>
+<li>LLM 调用（应用内再调用大模型）</li>
+<li>文本朗读</li>
+<li>持久化存储</li>
+<li>日历服务</li>
+</ul>
+
+<h4>3. 多模态生成</h4>
+<p>支持 3D 数字模型、音频、图标、动画、地图等全模态输出。上传图片即可生成应用（UI 复刻 + 信息提取）。</p>
+
+<h4>4. 灵光圈社区</h4>
+<p>用户生成的闪应用可以分享、点赞、二次创作。1 亿元创作者激励基金，每天最高 100 万激励 10000 个优质闪应用。</p>
+
+<h4>5. 数据规模</h4>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>上线 1 个月：1200 万闪应用</li>
+<li>上线 2 周：330 万闪应用</li>
+<li>截至 2026.04：3000 万+ 闪应用</li>
+<li>上线首日下载 20 万，两天 50 万</li>
+</ul>
+
+<h3>架构优劣势</h3>
+<table>
+<tr><th>优势</th><th>劣势</th></tr>
+<tr>
+<td>✅ 移动端原生，用户基数大</td>
+<td>❌ 依附支付宝生态</td>
+</tr>
+<tr>
+<td>✅ 30秒极速生成</td>
+<td>❌ 应用复杂度受限</td>
+</tr>
+<tr>
+<td>✅ 全模态输出（3D/音频/地图）</td>
+<td>❌ 无法导出独立应用</td>
+</tr>
+<tr>
+<td>✅ 强大的社区 + 创作者激励</td>
+<td>❌ 数据在云端</td>
+</tr>
+<tr>
+<td>✅ 手机原生能力集成</td>
+<td>❌ 闭源，无法借鉴实现</td>
+</tr>
+</table>
+
+<h3>对 LongMarch 的启示</h3>
+<p><strong>最重要的启示：社区 + 创作者激励。</strong> 灵光的"灵光圈"证明，AI 生成的应用需要社交层来放大价值。LongMarch 的 Community 页面应该加强：分享、点赞、Fork、二次创作、创作者排行榜。创作者激励可以考虑，但不需要 1 亿那么多。</p>
+<p><strong>技术启示：原生能力 API。</strong> 如果 LongMarch 未来做移动端，应该预置常用 API（相机、定位、存储）让 LLM 调用，而不是让 LLM 自己写。</p>
+
+<div class="divider"></div>
+
+<h2 id="ironsmith">四、Ironsmith 深度分析</h2>
+
+<p>已在前文详细分析（见 <code>ironsmith-detail/</code> 多页面报告）。核心要点回顾：</p>
+
+<h3>架构亮点</h3>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li><strong>单文件约束</strong> — LLM 只生成 ContentView.swift，平台提供固定脚手架</li>
+<li><strong>编译-修复循环</strong> — 确定性修复 → 模型修复 → 重新生成 → 回退最佳候选</li>
+<li><strong>Harness 层</strong> — 8 个确定性代码层确保可靠性</li>
+<li><strong>策略配置</strong> — maxGenerationAttempts / maxDeterministicPasses 等预算控制</li>
+<li><strong>多模型策略</strong> — 根据能力选择 diff / 全量重写</li>
+</ul>
+
+<h3>对 LongMarch 的启示</h3>
+<p><strong>最值得借鉴的 3 点：</strong></p>
+<ol style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>单文件/单区域约束 — 让 LLM 只生成 body 内容，平台提供完整 HTML 模板</li>
+<li>源码清洗层 — 剥离 think 块、Markdown 围栏、外部引用</li>
+<li>编译/验证循环 — HTML 解析验证 + 修复回退机制</li>
+</ol>
+
+<div class="divider"></div>
+
+<h2 id="western">五、西方竞品：Lovable / v0 / Bolt</h2>
+
+<h3>产品定位差异</h3>
+
+<table>
+<tr>
+<th>产品</th>
+<th>定位</th>
+<th>最佳用户</th>
+<th>输出</th>
+<th>锁定程度</th>
+</tr>
+<tr>
+<td><strong>Lovable</strong></td>
+<td>非技术创始人</td>
+<td>PM / 创业者</td>
+<td>全栈 SaaS 应用</td>
+<td>高（Supabase 锁定）</td>
+</tr>
+<tr>
+<td><strong>v0</strong></td>
+<td>组件生成器</td>
+<td>前端工程师</td>
+<td>React 组件 / 页面</td>
+<td>低（可导出到任何项目）</td>
+</tr>
+<tr>
+<td><strong>Bolt</strong></td>
+<td>浏览器 IDE</td>
+<td>开发者 / 黑客松</td>
+<td>全栈原型</td>
+<td>中（StackBlitz 平台）</td>
+</tr>
+</table>
+
+<h3>关键洞察</h3>
+<p>西方工具的核心差异是 <strong>"锁定程度"</strong>：</p>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li><strong>Lovable</strong> 最高锁定 — 数据库、Auth、部署全在平台内，用户无法导出独立运行</li>
+<li><strong>v0</strong> 最低锁定 — 生成干净代码，可以 drop 到任何 Next.js 项目</li>
+<li><strong>Bolt</strong> 中等 — 在浏览器里运行完整开发环境，但代码可见可导出</li>
+</ul>
+
+<p><strong>LongMarch 应该走低锁定路线（像 v0/Ironsmith），而不是高锁定（像 Lovable/灵光）。</strong> 因为开源和社区是核心价值，锁定会损害社区信任。</p>
+
+<div class="divider"></div>
+
+<h2 id="wechat">六、微信生态现状</h2>
+
+<p><strong>结论：微信目前没有官方的 "Agent 小程序 vibe 开发" 产品。</strong></p>
+
+<p>搜索结果显示的所有内容都是：</p>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>教程：用 Cursor / Trae + 豆包 开发小程序</li>
+<li>博客：Vibe Coding 实战记录</li>
+<li>开源项目：Easy-Vibe 教学框架</li>
+</ul>
+
+<p>没有微信官方推出的 "自然语言生成小程序" 功能。这意味着：</p>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>微信生态内没有直接竞品</li>
+<li>LongMarch 如果支持导出小程序，可以填补这个空白</li>
+<li>但微信审核机制可能会限制 AI 生成的小程序</li>
+</ul>
+
+<div class="divider"></div>
+
+<h2 id="compare">七、六维度对比矩阵</h2>
+
+<table>
+<tr>
+<th>维度</th>
+<th>KroWork</th>
+<th>灵光</th>
+<th>Ironsmith</th>
+<th>Lovable</th>
+<th>v0</th>
+<th>Bolt</th>
+</tr>
+<tr>
+<td><strong>生成速度</strong></td>
+<td class="score score-mid">~60s</td>
+<td class="score score-high">30s</td>
+<td class="score score-low">30-90s</td>
+<td class="score score-mid">~60s</td>
+<td class="score score-mid">~30s</td>
+<td class="score score-mid">~60s</td>
+</tr>
+<tr>
+<td><strong>平台覆盖</strong></td>
+<td>桌面</td>
+<td>移动端</td>
+<td>桌面</td>
+<td>Web</td>
+<td>Web</td>
+<td>Web</td>
+</tr>
+<tr>
+<td><strong>代码质量</strong></td>
+<td class="score score-mid">中</td>
+<td class="score score-mid">中</td>
+<td class="score score-high">高</td>
+<td class="score score-mid">中</td>
+<td class="score score-high">高</td>
+<td class="score score-mid">中</td>
+</tr>
+<tr>
+<td><strong>可靠性</strong></td>
+<td class="score score-mid">中</td>
+<td class="score score-mid">中</td>
+<td class="score score-high">高</td>
+<td class="score score-mid">中</td>
+<td class="score score-high">高</td>
+<td class="score score-mid">中</td>
+</tr>
+<tr>
+<td><strong>社区/分享</strong></td>
+<td class="score score-low">弱</td>
+<td class="score score-high">强</td>
+<td class="score score-low">弱</td>
+<td class="score score-mid">中</td>
+<td class="score score-mid">中</td>
+<td class="score score-mid">中</td>
+</tr>
+<tr>
+<td><strong>开源/可导出</strong></td>
+<td class="score score-low">❌</td>
+<td class="score score-low">❌</td>
+<td class="score score-high">✅</td>
+<td class="score score-low">❌</td>
+<td class="score score-high">✅</td>
+<td class="score score-mid">部分</td>
+</tr>
+<tr>
+<td><strong>锁定程度</strong></td>
+<td class="score score-high">低</td>
+<td class="score score-low">高</td>
+<td class="score score-high">低</td>
+<td class="score score-low">高</td>
+<td class="score score-high">低</td>
+<td class="score score-mid">中</td>
+</tr>
+<tr>
+<td><strong>多模型</strong></td>
+<td class="score score-high">✅</td>
+<td class="score score-low">❌</td>
+<td class="score score-high">✅</td>
+<td class="score score-low">❌</td>
+<td class="score score-low">❌</td>
+<td class="score score-low">❌</td>
+</tr>
+<tr>
+<td><strong>原生能力</strong></td>
+<td class="score score-mid">文件/浏览器</td>
+<td class="score score-high">相机/GPS/陀螺仪</td>
+<td class="score score-low">无</td>
+<td class="score score-low">无</td>
+<td class="score score-low">无</td>
+<td class="score score-low">无</td>
+</tr>
+<tr>
+<td><strong>验证/修复</strong></td>
+<td class="score score-mid">有</td>
+<td class="score score-mid">有</td>
+<td class="score score-high">强</td>
+<td class="score score-mid">有</td>
+<td class="score score-mid">有</td>
+<td class="score score-mid">有</td>
+</tr>
+</table>
+
+<div class="divider"></div>
+
+<h2 id="recommend">八、LongMarch 架构推荐</h2>
+
+<h3>推荐架构：Ironsmith + 灵光社区 + KroWork 多模型</h3>
+
+<p>基于竞品分析，LongMarch 应该采用 <strong>"Ironsmith 的可靠性 + 灵光的社区运营 + KroWork 的多模型策略"</strong> 的混合架构。</p>
+
+<h3>为什么选这套？</h3>
+
+<table>
+<tr><th>竞品优势</th><th>为什么适合 LongMarch</th></tr>
+<tr>
+<td>Ironsmith 的单文件约束</td>
+<td>Web 端天然适合单文件 HTML，约束后错误率降低 50%+</td>
+</tr>
+<tr>
+<td>Ironsmith 的 Harness 层</td>
+<td>HTML 也需要清洗、验证、修复，和 Swift 一样</td>
+</tr>
+<tr>
+<td>Ironsmith 的多模型策略</td>
+<td>BYOK 是社区产品的核心差异化（用户用自己的 API key）</td>
+</tr>
+<tr>
+<td>灵光的社区 + 创作者激励</td>
+<td>社区是 LongMarch 的核心价值主张，必须强化</td>
+</tr>
+<tr>
+<td>KroWork 的多模型调度</td>
+<td>让用户自选模型（DeepSeek/通义/豆包/OpenAI），降低成本</td>
+</tr>
+<tr>
+<td>v0 的低锁定</td>
+<td>开源社区必须低锁定，否则用户不信任</td>
+</tr>
+</table>
+
+<h3>推荐架构图</h3>
+<div class="arch-diagram">
+┌────────────────────────────────────────────────────────────┐
+│  用户层 (Web / 未来移动端)                                    │
+│  - 桌面启动器主页 · Generator · Community · AppDetail         │
+├────────────────────────────────────────────────────────────┤
+│  Controller 层 (Orchestrator)                                │
+│  - 六阶段管道调度                                             │
+│  - 模型选择器 (BYOK + 默认 DeepSeek)                         │
+│  - 策略配置 (maxAttempts / timeout / budget)                  │
+├────────────────────────────────────────────────────────────┤
+│  Agent 层 (LLM 驱动)                                         │
+│  - 元数据生成 Agent (可选 · 轻量级)                           │
+│  - 提示词优化 Agent (可选)                                     │
+│  - 代码生成 Agent (核心 · 40+ 约束)                           │
+│  - 模型修复 Agent (Diff / 全量重写)                           │
+├────────────────────────────────────────────────────────────┤
+│  Harness 层 (代码逻辑 · 可靠性)                               │
+│  - HtmlSourceCleanup (清洗 · 剥离围栏/外部引用)               │
+│  - HtmlValidationPolicy (验证 · 语法/安全/大小)               │
+│  - DeterministicHtmlFixes (修复 · 未闭合标签/错误嵌套)         │
+│  - VersionBackupClient (版本 · 编辑前备份)                     │
+│  - AppBundleBuilder (打包 · iframe沙盒/CSP)                   │
+│  - DiagnosticsLog (日志 · 调试记录)                            │
+├────────────────────────────────────────────────────────────┤
+│  基础设施层                                                  │
+│  - LanguageModelClient (多模型封装 · OpenAI兼容)               │
+│  - ProviderCatalog (DeepSeek/通义/豆包/OpenAI/本地Ollama)       │
+│  - CredentialManager (用户自有 API Key 管理)                   │
+│  - ToolRepository (SQLite · 应用/版本/社区数据)               │
+│  - CommunityEngine (点赞/收藏/Fork/排行榜)                      │
+└────────────────────────────────────────────────────────────┘
+</div>
+
+<h3>和当前架构的差异</h3>
+
+<table>
+<tr>
+<th>当前架构</th>
+<th>推荐架构</th>
+<th>工作量</th>
+</tr>
+<tr>
+<td>直接调用 LLM → 返回 JSON</td>
+<td>六阶段管道 + Harness 层</td>
+<td>2-3 周</td>
+</tr>
+<tr>
+<td>无 Cleanup</td>
+<td>HtmlSourceCleanup (8 条规则)</td>
+<td>3-5 天</td>
+</tr>
+<tr>
+<td>无验证</td>
+<td>HtmlValidationPolicy + DeterministicHtmlFixes</td>
+<td>1-2 周</td>
+</tr>
+<tr>
+<td>无版本备份</td>
+<td>编辑前自动保存</td>
+<td>2-3 天</td>
+</tr>
+<tr>
+<td>单模型 (DeepSeek)</td>
+<td>多模型 BYOK + 默认 DeepSeek</td>
+<td>1-2 周</td>
+</tr>
+<tr>
+<td>简单社区</td>
+<td>灵光圈式社区 + 创作者激励</td>
+<td>2-3 周</td>
+</tr>
+</table>
+
+<div class="recommendation">
+<h3>🎯 核心推荐</h3>
+<p>不要一次性全做。按照 <strong>"P0 生存 → P1 体验 → P2 生态"</strong> 的顺序：</p>
+<p><strong>P0（现在就能做）：</strong> 添加 HtmlSourceCleanup + 完整系统提示词（40+ 约束）+ user message</p>
+<p><strong>P1（2周内）：</strong> 添加 HTML 验证 + 版本备份 + 多模型 BYOK</p>
+<p><strong>P2（1-2个月）：</strong> 社区强化 + 创作者激励 + 移动端原生能力</p>
+</div>
+
+<div class="divider"></div>
+
+<h2 id="roadmap">九、实施路线图</h2>
+
+<h3>Phase 1: 可靠性（现在 - 2 周）</h3>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>重写系统提示词（添加 40+ 约束，特别是负约束）</li>
+<li>添加 HtmlSourceCleanup（剥离 think 块、Markdown 围栏、外部引用）</li>
+<li>添加 user message（把 description/name/tags 发给 LLM）</li>
+<li>添加 HTML 语法验证（检查未闭合标签、错误嵌套）</li>
+<li>添加版本备份（编辑前自动保存）</li>
+</ul>
+
+<h3>Phase 2: 多模型 + 用户体验（2-4 周）</h3>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>支持多模型（DeepSeek / 通义 / 豆包 / OpenAI）</li>
+<li>支持 BYOK（用户填入自己的 API Key）</li>
+<li>添加 Generator 进度可视化（像 Ironsmith 的编译进度）</li>
+<li>添加错误修复循环（验证失败 → 把错误发给 LLM → 重新生成）</li>
+</ul>
+
+<h3>Phase 3: 社区生态（1-2 个月）</h3>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>强化 Community（排行榜、分类、推荐算法）</li>
+<li>添加创作者激励（积分/徽章/排行榜）</li>
+<li>支持 Fork + 二次创作</li>
+<li>支持导出（HTML 下载 / 小程序 / 桌面应用）</li>
+</ul>
+
+<h3>Phase 4: 差异化（3-6 个月）</h3>
+<ul style="margin:12px 0;padding-left:24px;color:var(--muted)">
+<li>移动端 App（调用相机、定位、存储）</li>
+<li>"应用固化"概念（缓存/预编译加速）</li>
+<li>多模态生成（图片 → 应用）</li>
+<li>企业版（团队空间、私有部署）</li>
+</ul>
+
+<div class="divider"></div>
+
+<div class="footnote">
+<p>📚 参考来源：</p>
+<ul style="padding-left:20px;margin:8px 0">
+<li><a href="https://github.com/Jeidoban/Ironsmith" target="_blank">Ironsmith GitHub</a> / <a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a></li>
+<li>快手 KroWork: <a href="https://view.inews.qq.com/a/20260430A06EYP00" target="_blank">腾讯新闻</a> / <a href="https://www.163.com/dy/article/KRVK8HS305568W0A.html" target="_blank">网易</a></li>
+<li>蚂蚁灵光: <a href="https://news.caijingmobile.com/article/detail/567418" target="_blank">财经</a> / <a href="https://www.sohu.com/a/1011979129_114760" target="_blank">搜狐</a></li>
+<li>Lovable / v0 / Bolt: <a href="https://aiagentrank.io/blog/lovable-vs-bolt-vs-v0-2026" target="_blank">AI Agent Rank</a> / <a href="https://vallettasoftware.com/blog/post/vibe-coding-tools" target="_blank">Valletta Software</a></li>
+</ul>
+<p>📝 数据截至 2026-06-16，基于公开信息整理。</p>
+</div>
+
+</div>
+</body>
+</html>

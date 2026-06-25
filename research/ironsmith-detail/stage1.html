@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阶段① · 元数据生成 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>阶段① · 元数据生成</h1>
+  <p class="subtitle">ToolMetadataClient · 轻量级模型 · 确定性回退</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html" class="active">① 元数据</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+  </div>
+
+  <span class="stage-badge agent">Agent（LLM 驱动）</span>
+
+  <h2>职责</h2>
+  <p>从用户原始 Prompt 中提取两个关键信息：</p>
+  <ul style="margin:12px 0;padding-left:24px;color:var(--text-muted)">
+    <li><strong>短显示名称</strong> — 用于应用列表和菜单栏（如 "PDF Splitter"）</li>
+    <li><strong>图标描述</strong> — 用于 AI 生成应用图标（如 "A document splitting into two parts"）</li>
+  </ul>
+
+  <h2>源码结构</h2>
+  <p>基于 AGENTS.md 反推的 <code>ToolMetadataClient</code> 概念代码：</p>
+
+  <pre><code>// ToolMetadataClient.swift
+// 职责：从用户 Prompt 生成元数据（名称 + 图标描述）
+
+struct ToolMetadataClient {
+    
+    // 主入口：生成元数据
+    func generateMetadata(from userPrompt: String) async -> ToolMetadata {
+        // 1. 尝试用 LLM 生成结构化元数据
+        if let metadata = await generateWithLLM(userPrompt) {
+            return metadata
+        }
+        
+        // 2. 确定性回退：从 prompt 中提取关键词
+        return deterministicFallback(userPrompt)
+    }
+    
+    // LLM 生成路径
+    private func generateWithLLM(_ prompt: String) async -> ToolMetadata? {
+        let systemPrompt = """
+        You are a naming assistant. Given a user's app description,
+        generate a concise display name and icon description.
+        
+        Output JSON only:
+        {"displayName": "Short Name", "iconDescription": "Visual description"}
+        """
+        
+        let userPrompt = "App description: \(prompt)"
+        
+        // 使用轻量级模型（如 Apple Foundation Model 或本地小模型）
+        let response = await languageModel.chat(
+            system: systemPrompt,
+            user: userPrompt
+        )
+        
+        // 解析 JSON，失败返回 nil → 触发回退
+        return parseMetadataJSON(response)
+    }
+    
+    // 确定性回退：无需 LLM
+    private func deterministicFallback(_ prompt: String) -> ToolMetadata {
+        // 策略：提取前 2-3 个关键词，组合成名称
+        let words = extractKeywords(prompt)
+        let name = words.prefix(3).joined(separator: " ")
+        
+        // 图标描述：基于关键词构造简单描述
+        let iconDesc = "An icon representing \(name)"
+        
+        return ToolMetadata(
+            displayName: name.capitalized,
+            iconDescription: iconDesc
+        )
+    }
+    
+    private func extractKeywords(_ text: String) -> [String] {
+        // 简单规则：去除停用词，提取名词
+        let stopWords = ["a", "an", "the", "make", "build", "create", "app"]
+        return text.lowercased()
+            .components(separatedBy: .whitespacesAndPunctuation)
+            .filter { !$0.isEmpty && !stopWords.contains($0) }
+            .prefix(5)
+            .map { $0 }
+    }
+}
+
+struct ToolMetadata {
+    let displayName: String      // e.g. "PDF Splitter"
+    let iconDescription: String  // e.g. "A document splitting into two"
+}</code></pre>
+
+  <h2>模型提示词</h2>
+
+  <div class="prompt-block">
+    <h5>系统提示（System Prompt）</h5>
+    <pre><code>You are a concise naming assistant for macOS utility apps.
+Given a user's description of what they want to build, generate:
+1. A short, catchy display name (2-4 words)
+2. A brief icon description for AI image generation
+
+Rules:
+- The name should be clear and app-store friendly
+- Avoid generic names like "Tool" or "Utility"
+- Prefer verbs or nouns that describe the core action
+- The icon description should be a visual scene, not abstract
+- Output ONLY valid JSON, no markdown</code></pre>
+  </div>
+
+  <div class="prompt-block">
+    <h5>用户提示（User Prompt）示例</h5>
+    <pre><code>App description: "Make a utility that renames a folder of screenshots by date and window title."</code></pre>
+  </div>
+
+  <div class="prompt-block">
+    <h5>预期输出（Expected Output）</h5>
+    <pre><code>{"displayName": "Screenshot Renamer", "iconDescription": "A folder of photos being organized with labels showing dates"}</code></pre>
+  </div>
+
+  <h2>关键设计决策</h2>
+
+  <h4>为什么单独分一个阶段？</h4>
+  <p><strong>成本优化。</strong> 元数据生成不需要 GPT-4 级别的模型。本地小模型（如 Apple Foundation Model）或弱 LLM 就能做。如果本地模型失败，用确定性回退（从用户 prompt 中提取关键词）。这样可以节省 API 费用。</p>
+
+  <h4>为什么用结构化输出（JSON）？</h4>
+  <p>JSON 解析失败率远低于自由文本。如果 LLM 输出不合法 JSON，系统立即知道失败了，触发回退。不需要 "猜" LLM 的输出格式。</p>
+
+  <h4>为什么是可并行的？</h4>
+  <p>元数据生成和内容生成（阶段 3）没有依赖关系。理论上可以并行执行：同时让 LLM 生成名称和代码，然后再组装。但 Ironsmith 的实现中，名称用于创建包目录，所以是串行的。不过 AGENTS.md 提到 "metadata generation must remain a soft enhancement"，说明它是非阻塞的。</p>
+
+  <div class="highlight">
+    <p>💡 <strong>对 LongMarch 的启示：</strong> 分离 "元数据生成" 和 "代码生成"，用不同的模型（或不同的 temperature）处理。元数据用低 temperature 保证结构化，代码生成用高 temperature 保证创造力。</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a> — "ToolMetadataClient.live() may use local structured generation... metadata generation must remain a soft enhancement with a deterministic fallback."</p>
+  </div>
+
+</div>
+</body>
+</html>

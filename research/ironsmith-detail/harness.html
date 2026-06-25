@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Harness 详解 · Ironsmith 详细拆解</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+
+  <a href="index.html" class="back-link">← 返回首页</a>
+
+  <h1>Harness 详解</h1>
+  <p class="subtitle">Deterministic Harness · 所有非 LLM 的可靠性层</p>
+
+  <div class="nav-bar">
+    <a href="index.html">首页</a>
+    <a href="stage1.html">① 元数据</a>
+    <a href="stage2.html">② 提示词优化</a>
+    <a href="stage3.html">③ 核心代码</a>
+    <a href="stage4.html">④ 源码清洗</a>
+    <a href="stage5.html">⑤ 编译修复</a>
+    <a href="stage6.html">⑥ 应用打包</a>
+    <a href="edit-mode.html">编辑模式</a>
+    <a href="harness.html" class="active">Harness</a>
+  </div>
+
+  <h2>什么是 Harness？</h2>
+  <p>Harness 是 Ironsmith 架构中 <strong>所有非 LLM 的代码层</strong>。它们用确定性规则（正则、AST 操作、配置对象）确保系统的可靠性。Harness 不懂代码语义，但 100% 可靠。</p>
+
+  <div class="highlight">
+    <p>🔧 <strong>核心原则：</strong> 凡是能用代码规则解决的，绝不用 LLM。LLM 只在 "需要理解代码语义" 的场景使用（如修复编译错误）。</p>
+  </div>
+
+  <h2>所有 Harness 汇总</h2>
+
+  <div class="component-list">
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> ContentViewSourceCleanup</h4>
+      <p>源码清洗。剥离 Markdown 围栏、移除 Preview 块、修复陷阱、格式化。</p>
+      <div class="meta">阶段 4 · 纯正则 + AST 操作 · 100% 确定</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> ToolGenerationRepairPolicy</h4>
+      <p>策略配置。定义所有数字阈值和预算（最大尝试次数、稳定阈值、无效 patch 阈值）。</p>
+      <div class="meta">阶段 5 · 配置对象 · 防止无限循环</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> DeterministicRepairRules</h4>
+      <p>确定性修复。基于正则规则修复常见 Swift/SwiftUI 编译错误。</p>
+      <div class="meta">阶段 5 · 正则规则库 · 无副作用</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> SwiftPackageProcessClient</h4>
+      <p>编译客户端。执行 swift build，解析编译器输出为结构化诊断。</p>
+      <div class="meta">阶段 5 · 进程调用 · 错误提取</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> ToolVersionBackupClient</h4>
+      <p>版本备份。原子暂存、promote、恢复、discard。</p>
+      <div class="meta">编辑模式 · 文件系统操作 · 路径逃逸检查</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> ToolAppBundleClient</h4>
+      <p>应用打包。签名、沙盒、图标、原子替换、quarantine 清除。</p>
+      <div class="meta">阶段 6 · 系统调用 · 安全发布</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> ToolIconClient</h4>
+      <p>图标生成。使用 Apple Foundation Model 或缓存生成应用图标。</p>
+      <div class="meta">阶段 6 · 图像生成 · 优雅降级</div>
+    </div>
+    <div class="component-item">
+      <h4><span class="tag-harness">Harness</span> AgentDiagnosticsLog</h4>
+      <p>诊断日志。DEBUG 模式下记录修复循环的每一步（不存储完整模型响应）。</p>
+      <div class="meta">全局 · 日志记录 · 紧凑</div>
+    </div>
+  </div>
+
+  <h2>Harness vs. Agent 对比</h2>
+
+  <table class="constraint-table">
+    <tr>
+      <th>维度</th>
+      <th>Harness</th>
+      <th>Agent</th>
+    </tr>
+    <tr>
+      <td>驱动力</td>
+      <td>代码规则（正则、配置、进程调用）</td>
+      <td>LLM（生成文本）</td>
+    </tr>
+    <tr>
+      <td>可靠性</td>
+      <td>100% 确定（同样的输入总是同样的输出）</td>
+      <td>概率性（同样的输入可能不同输出）</td>
+    </tr>
+    <tr>
+      <td>成本</td>
+      <td>零 API 成本（本地计算）</td>
+      <td>高 API 成本（每次调用消耗 token）</td>
+    </tr>
+    <tr>
+      <td>速度</td>
+      <td>毫秒级</td>
+      <td>秒级（取决于模型响应时间）</td>
+    </tr>
+    <tr>
+      <td>能力</td>
+      <td>只能处理预定义模式</td>
+      <td>能处理未知模式（理解语义）</td>
+    </tr>
+    <tr>
+      <td>安全</td>
+      <td>安全（不会执行危险操作）</td>
+      <td>需要沙盒保护（可能生成危险代码）</td>
+    </tr>
+  </table>
+
+  <h2>分层架构图</h2>
+
+  <pre><code>┌─────────────────────────────────────────────────────────┐
+│  用户层 (UI)                                              │
+│  - 菜单栏弹窗 · 输入框 · 应用列表 · 操作按钮                  │
+├─────────────────────────────────────────────────────────┤
+│  Controller 层                                            │
+│  - SingleFileToolGenerationRuntime (六阶段调度)            │
+│  - InferenceStore (模型状态管理)                            │
+│  - ToolLibraryStore (工具库 UI 状态)                      │
+├─────────────────────────────────────────────────────────┤
+│  Agent 层 (LLM 驱动)                                      │
+│  - ToolMetadataClient (元数据)                           │
+│  - Content Generation (代码生成)                          │
+│  - ContentViewBuildRepairLoop (模型修复)                 │
+│  - Edit Mode (Diff / 全量重写)                            │
+├─────────────────────────────────────────────────────────┤
+│  Harness 层 (代码逻辑)                                     │
+│  - ContentViewSourceCleanup (源码清洗)                     │
+│  - ToolGenerationRepairPolicy (策略配置)                   │
+│  - DeterministicRepairRules (确定性修复)                  │
+│  - SwiftPackageProcessClient (编译)                       │
+│  - ToolVersionBackupClient (版本备份)                      │
+│  - ToolAppBundleClient (应用打包)                          │
+│  - ToolIconClient (图标生成)                              │
+│  - AgentDiagnosticsLog (诊断日志)                          │
+├─────────────────────────────────────────────────────────┤
+│  基础设施层                                               │
+│  - LanguageModelClient (LLM 调用封装)                       │
+│  - ProviderCatalog (提供商配置)                           │
+│  - CredentialClient (密钥管理)                            │
+│  - ToolRepository (数据持久化)                            │
+└─────────────────────────────────────────────────────────┘</code></pre>
+
+  <h2>对 LongMarch 的架构建议</h2>
+
+  <p>基于 Ironsmith 的 Harness 设计，LongMarch 应该添加以下 Harness 层：</p>
+
+  <div class="prompt-block">
+    <h5>LongMarch 建议的 Harness 架构</h5>
+    <pre><code>// 1. HtmlSourceCleanup (源码清洗)
+//    - 剥离 Markdown 围栏
+//    - 移除 &lt;html&gt;/&lt;head&gt;/&lt;body&gt; 标签
+//    - 移除外部 CSS/JS 引用
+//    - 修复常见 HTML 错误
+
+// 2. HtmlValidationPolicy (验证策略)
+//    - 定义最大文件大小
+//    - 定义禁止标签（script src, iframe, form action 等）
+//    - 定义必需的 CSP 策略
+
+// 3. DeterministicHtmlFixes (确定性修复)
+//    - 自动闭合未闭合标签
+//    - 修复错误嵌套
+//    - 移除危险属性（onclick=eval, onerror 等）
+
+// 4. AppBundleBuilder (应用打包)
+//    - 将 HTML 嵌入 iframe 沙盒
+//    - 添加 CSP 头
+//    - 生成缩略图预览
+
+// 5. VersionBackupClient (版本备份)
+//    - 编辑前保存到数据库
+//    - 支持一键恢复
+//    - 保留最近 N 个版本（如 5 个）</code></pre>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="footnote">
+    <p>📚 参考：<a href="https://github.com/Jeidoban/Ironsmith/blob/main/AGENTS.md" target="_blank">AGENTS.md</a></p>
+  </div>
+
+</div>
+</body>
+</html>
